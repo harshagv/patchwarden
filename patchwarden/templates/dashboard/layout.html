@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<nav>
+  <span class="grow">Patchwarden</span>
+  <a href="/dashboard/sites">Your sites</a>
+  <a href="/dashboard/alerts">Alerts{% if unread %} ({{ unread }} new){% endif %}</a>
+  <form method="post" action="/dashboard/logout" class="inline"><button class="secondary" type="submit">Log out</button></form>
+</nav>
+{% if error %}<p class="alert">{{ error }}</p>{% endif %}
+{% block page %}{% endblock %}
+{% endblock %}

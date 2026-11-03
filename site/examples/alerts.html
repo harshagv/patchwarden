@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="robots" content="noindex">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Alerts - Patchwarden</title>
+<style>
+  :root { --ink:#1d2330; --muted:#5b6475; --line:#dfe3ea; --bg:#f6f7f9; --card:#fff;
+          --safe:#1f7a4d; --patch:#b25e00; --migrate:#b3261e; --unknown:#4b5563; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width:760px; margin:32px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:28px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  h2 { font-size:1.05rem; margin:0 0 6px; text-transform:none; }
+  .muted { color:var(--muted); font-size:.92rem; }
+  .badge { display:inline-block; padding:6px 14px; border-radius:999px; color:#fff; font-weight:600; }
+  .risk-safe { background:var(--safe); } .risk-patch_now { background:var(--patch); }
+  .risk-must_migrate { background:var(--migrate); } .risk-unknown { background:var(--unknown); }
+  .grid { display:grid; gap:18px; margin-top:22px; }
+  .block { border-top:1px solid var(--line); padding-top:16px; }
+  .big { font-size:1.35rem; font-weight:600; }
+  ul { padding-left:20px; margin:6px 0; }
+  details { margin-top:22px; font-size:.88rem; color:var(--muted); }
+  table { border-collapse:collapse; width:100%; font-family:ui-monospace, Menlo, monospace; font-size:.8rem; }
+  td { border-top:1px solid var(--line); padding:4px 6px; vertical-align:top; word-break:break-all; }
+  footer { margin-top:18px; font-size:.82rem; color:var(--muted); }
+  .wide { max-width:980px; }
+  nav { display:flex; gap:16px; align-items:center; margin-bottom:18px; }
+  nav .grow { flex:1; font-weight:700; }
+  button, .btn { font:inherit; padding:8px 16px; border-radius:8px; border:1px solid var(--ink);
+                 background:var(--ink); color:#fff; cursor:pointer; text-decoration:none; }
+  button.secondary { background:#fff; color:var(--ink); }
+  button.danger { background:var(--migrate); border-color:var(--migrate); }
+  input, select { font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:8px; }
+  form.inline { display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center; margin:4px 0; }
+  .alert { background:#fdecea; border:1px solid #f5c2bd; color:var(--migrate); padding:10px 14px; border-radius:8px; }
+  .ok { color:var(--safe); font-weight:600; } .bad { color:var(--migrate); font-weight:600; }
+  .state-succeeded { background:var(--safe); } .state-failed, .state-rolled_back { background:var(--migrate); }
+  .state-dry_run, .state-awaiting_approval, .state-running { background:var(--patch); }
+  table.plain { font-family:inherit; font-size:.92rem; } table.plain th { text-align:left; padding:4px 6px; }
+  @media print { body { background:#fff; } main { margin:0; } .card { border:none; padding:0; }
+                 details, nav, form, .noprint { display:none !important; } }
+</style>
+<style>.pw-example{position:sticky;top:0;z-index:9;background:#1d1c1a;color:#f0ede7;font:13px/1.4 system-ui,sans-serif;padding:8px 14px;text-align:center}.pw-example a{color:#dfa592;pointer-events:auto}form,button,input,select,main a,nav a{pointer-events:none}</style></head>
+<body><div class="pw-example">Example output from the Patchwarden demo sites · buttons are disabled · <a href="../#screens" target="_top">back to the overview</a></div><main class="wide">
+<nav>
+  <span class="grow">Patchwarden</span>
+  <a href="#">Your sites</a>
+  <a href="#">Alerts (3 new)</a>
+  <form method="post" action="/dashboard/logout" class="inline"><button class="secondary" type="submit">Log out</button></form>
+</nav>
+
+
+<div class="card">
+  <h1>Alerts</h1>
+  <p class="muted">The Watchdog checks your monitored sites every day, and new PHP security flaws every hour.</p>
+  
+  <section class="block">
+    <h2>php83-unpatched.demo.patchwarden.test <span class="badge risk-must_migrate">high</span>
+      <span class="muted">new</span></h2>
+    
+      
+      <p><strong>What changed:</strong> A new security flaw (PHPG-DEMO-2026-0101) was published, rated high.</p>
+    
+      
+      <p><strong>What it means:</strong> Your site php83-unpatched.demo.patchwarden.test runs PHP 8.3.20, which is affected. Demo only: a made-up flaw in PHP 8.3 before 8.3.40 that lets a crafted upload crash PHP workers.</p>
+    
+      
+      <p><strong>What to do:</strong> Update PHP to 8.3.40 or newer. You can start the update, with a backup and your approval, from your Patchwarden dashboard.</p>
+    
+      
+      <p><a href="#">Open php83-unpatched.demo.patchwarden.test and plan the update</a></p>
+      
+    
+    <p class="muted">Nov 3, 2026 15:14 UTC · Not emailed (email is not set up)</p>
+    
+    <form method="post" action="/dashboard/alerts/3/read" class="inline">
+      <input type="hidden" name="csrf" value="example"><button class="secondary" type="submit">Mark as read</button>
+    </form>
+  </section>
+  
+  <section class="block">
+    <h2>php83-unpatched.demo.patchwarden.test <span class="badge risk-must_migrate">critical</span>
+      <span class="muted">new</span></h2>
+    
+      
+      <p><strong>What changed:</strong> Our check found PHP 8.3.20 on php83-unpatched.demo.patchwarden.test.</p>
+    
+      
+      <p><strong>What it means:</strong> PHP 8.3.20 has the flaw that lets attackers take over a site without logging in.</p>
+    
+      
+      <p><strong>What to do:</strong> Update PHP to 8.3.36 or newer as soon as possible. Our Patch agent can do it with your approval.</p>
+    
+      
+      <p><a href="#">Open php83-unpatched.demo.patchwarden.test and plan the update</a></p>
+      
+    
+    <p class="muted">Nov 3, 2026 15:14 UTC · Not emailed (email is not set up)</p>
+    
+    <form method="post" action="/dashboard/alerts/2/read" class="inline">
+      <input type="hidden" name="csrf" value="example"><button class="secondary" type="submit">Mark as read</button>
+    </form>
+  </section>
+  
+  <section class="block">
+    <h2>wpshop84.demo.patchwarden.test <span class="badge risk-must_migrate">critical</span>
+      <span class="muted">new</span></h2>
+    
+      
+      <p><strong>What changed:</strong> Our check found PHP 8.4.13 on wpshop84.demo.patchwarden.test.</p>
+    
+      
+      <p><strong>What it means:</strong> PHP 8.4.13 has the flaw that lets attackers take over a site without logging in.</p>
+    
+      
+      <p><strong>What to do:</strong> Update PHP to 8.4.27 or newer as soon as possible. Our Patch agent can do it with your approval.</p>
+    
+      
+      <p><a href="#">Open wpshop84.demo.patchwarden.test and plan the update</a></p>
+      
+    
+    <p class="muted">Nov 3, 2026 15:14 UTC · Not emailed (email is not set up)</p>
+    
+    <form method="post" action="/dashboard/alerts/1/read" class="inline">
+      <input type="hidden" name="csrf" value="example"><button class="secondary" type="submit">Mark as read</button>
+    </form>
+  </section>
+  
+</div>
+
+</main></body>
+</html>

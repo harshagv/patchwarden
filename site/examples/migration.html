@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="robots" content="noindex">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Migration #1 for wp74.demo.patchwarden.test</title>
+<style>
+  :root { --ink:#1d2330; --muted:#5b6475; --line:#dfe3ea; --bg:#f6f7f9; --card:#fff;
+          --safe:#1f7a4d; --patch:#b25e00; --migrate:#b3261e; --unknown:#4b5563; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width:760px; margin:32px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:28px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  h2 { font-size:1.05rem; margin:0 0 6px; text-transform:none; }
+  .muted { color:var(--muted); font-size:.92rem; }
+  .badge { display:inline-block; padding:6px 14px; border-radius:999px; color:#fff; font-weight:600; }
+  .risk-safe { background:var(--safe); } .risk-patch_now { background:var(--patch); }
+  .risk-must_migrate { background:var(--migrate); } .risk-unknown { background:var(--unknown); }
+  .grid { display:grid; gap:18px; margin-top:22px; }
+  .block { border-top:1px solid var(--line); padding-top:16px; }
+  .big { font-size:1.35rem; font-weight:600; }
+  ul { padding-left:20px; margin:6px 0; }
+  details { margin-top:22px; font-size:.88rem; color:var(--muted); }
+  table { border-collapse:collapse; width:100%; font-family:ui-monospace, Menlo, monospace; font-size:.8rem; }
+  td { border-top:1px solid var(--line); padding:4px 6px; vertical-align:top; word-break:break-all; }
+  footer { margin-top:18px; font-size:.82rem; color:var(--muted); }
+  .wide { max-width:980px; }
+  nav { display:flex; gap:16px; align-items:center; margin-bottom:18px; }
+  nav .grow { flex:1; font-weight:700; }
+  button, .btn { font:inherit; padding:8px 16px; border-radius:8px; border:1px solid var(--ink);
+                 background:var(--ink); color:#fff; cursor:pointer; text-decoration:none; }
+  button.secondary { background:#fff; color:var(--ink); }
+  button.danger { background:var(--migrate); border-color:var(--migrate); }
+  input, select { font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:8px; }
+  form.inline { display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center; margin:4px 0; }
+  .alert { background:#fdecea; border:1px solid #f5c2bd; color:var(--migrate); padding:10px 14px; border-radius:8px; }
+  .ok { color:var(--safe); font-weight:600; } .bad { color:var(--migrate); font-weight:600; }
+  .state-succeeded { background:var(--safe); } .state-failed, .state-rolled_back { background:var(--migrate); }
+  .state-dry_run, .state-awaiting_approval, .state-running { background:var(--patch); }
+  table.plain { font-family:inherit; font-size:.92rem; } table.plain th { text-align:left; padding:4px 6px; }
+  @media print { body { background:#fff; } main { margin:0; } .card { border:none; padding:0; }
+                 details, nav, form, .noprint { display:none !important; } }
+</style>
+<style>.pw-example{position:sticky;top:0;z-index:9;background:#1d1c1a;color:#f0ede7;font:13px/1.4 system-ui,sans-serif;padding:8px 14px;text-align:center}.pw-example a{color:#dfa592;pointer-events:auto}form,button,input,select,main a,nav a{pointer-events:none}</style></head>
+<body><div class="pw-example">Example output from the Patchwarden demo sites · buttons are disabled · <a href="../#screens" target="_top">back to the overview</a></div><main class="wide">
+<nav>
+  <span class="grow">Patchwarden</span>
+  <a href="#">Your sites</a>
+  <a href="#">Alerts</a>
+  <form method="post" action="/dashboard/logout" class="inline"><button class="secondary" type="submit">Log out</button></form>
+</nav>
+
+
+
+
+<div class="card">
+  <p class="muted">Patchwarden: migration plan and breakage report #1</p>
+  <h1>Move wp74.demo.patchwarden.test from PHP 7.4.33 to 8.4.27</h1>
+  <p><span class="badge state-dry_run">Planned: nothing changed yet</span></p>
+
+  <div class="grid">
+    <section class="block">
+      <h2>The plan</h2>
+      <p>Target: <strong>PHP 8.4.27</strong> · Effort: <strong>small</strong> (A few hours of developer time.)</p>
+      <ol><li>Copy the site to a staging site. Production is not touched.</li><li>Apply the automatic fixes on staging; a developer makes the manual fixes on staging.</li><li>Switch staging to PHP 8.4.27 and run the site checks there.</li><li>The owner or IT signs off in the dashboard after checking staging.</li><li>Promote: back up production, copy the tested code (not the database or config) to production, switch production to PHP 8.4.27, re-check, and roll back automatically if anything fails.</li></ol>
+    </section>
+
+    <section class="block">
+      <h2>What breaks (4 breaking, 2 to review)</h2>
+      <p class="muted">Scanned 3 PHP files, skipped 1 WordPress core files (update WordPress itself).</p>
+      
+      <ol>
+        <li><strong>create_function() was removed</strong> <span class="bad">(breaks in PHP 8.0)</span><br>
+          Rewrite as an anonymous function: function ($a) { ... }. <em>A developer fixes this on staging.</em><br>
+          <span class="muted">wp-content/plugins/bakery-orders/bakery-orders.php:13</span></li>
+      
+        <li><strong>Curly-brace string/array offsets ($s{0}) were removed</strong> <span class="bad">(breaks in PHP 8.0)</span><br>
+          Use square brackets: $s[0]. <em>Patchwarden applies this on staging.</em><br>
+          <span class="muted">wp-content/themes/bakery/functions.php:11</span></li>
+      
+        <li><strong>each() was removed</strong> <span class="bad">(breaks in PHP 8.0)</span><br>
+          Rewrite the loop with foreach ($array as $key =&gt; $value). <em>A developer fixes this on staging.</em><br>
+          <span class="muted">wp-content/plugins/bakery-orders/bakery-orders.php:6</span></li>
+      
+        <li><strong>get_magic_quotes_gpc() / get_magic_quotes_runtime() were removed</strong> <span class="bad">(breaks in PHP 8.0)</span><br>
+          They always returned false since PHP 5.4: replace the call with false. <em>Patchwarden applies this on staging.</em><br>
+          <span class="muted">wp-content/themes/bakery/functions.php:4</span></li>
+      
+        <li><strong>A function deprecated in PHP 8.1</strong> <span class="muted">(review in PHP 8.1)</span><br>
+          strftime(): use IntlDateFormatter or date(). mhash*(): use hash(). date_sunrise/sunset(): use date_sun_info(). <em>A developer fixes this on staging.</em><br>
+          <span class="muted">wp-content/themes/bakery/functions.php:19</span></li>
+      
+        <li><strong>Implicitly nullable parameter types are deprecated</strong> <span class="muted">(review in PHP 8.4)</span><br>
+          Write ?Type $x = null instead of Type $x = null. <em>Patchwarden applies this on staging.</em><br>
+          <span class="muted">wp-content/themes/bakery/functions.php:14</span></li>
+      </ol>
+      <table class="plain">
+        <tr><th>File</th><th>Line</th><th>Found</th><th>Code</th></tr>
+        <tr><td>wp-content/plugins/bakery-orders/bakery-orders.php</td><td>6</td><td class="bad">each</td><td><code>while (list($sku, $qty) = each($items)) {</code></td></tr><tr><td>wp-content/plugins/bakery-orders/bakery-orders.php</td><td>13</td><td class="bad">create_function</td><td><code>usort($orders, create_function(&#39;…&#39;, &#39;…&#39;));</code></td></tr><tr><td>wp-content/themes/bakery/functions.php</td><td>4</td><td class="bad">get_magic_quotes_gpc</td><td><code>if (get_magic_quotes_gpc()) {</code></td></tr><tr><td>wp-content/themes/bakery/functions.php</td><td>11</td><td class="bad">${…} offset</td><td><code>return strtoupper($title{0});</code></td></tr><tr><td>wp-content/themes/bakery/functions.php</td><td>14</td><td class="">Type $x = null</td><td><code>function bakery_badge(WP_Post $post = null) {</code></td></tr><tr><td>wp-content/themes/bakery/functions.php</td><td>19</td><td class="">strftime</td><td><code>return strftime(&#39;…&#39;, $ts);</code></td></tr>
+      </table>
+      
+    </section>
+
+    
+
+    <section class="block noprint">
+      
+      <form method="post" action="/dashboard/migrations/1/staging" class="inline">
+        <input type="hidden" name="csrf" value="example">
+        <button class="" type="submit">Run staging tests</button>
+      </form>
+      
+      
+      
+    </section>
+
+    <section class="block">
+      <h2>Record</h2>
+      <p>Planned: 2026-11-03T15:14:39.264826+00:00<br>
+         Signed off by: not signed off<br>
+         </p>
+    </section>
+  </div>
+  <footer>To keep a copy of the plan, use your browser's Print or Save as PDF.</footer>
+</div>
+
+</main></body>
+</html>

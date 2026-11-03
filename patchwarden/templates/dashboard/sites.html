@@ -1,0 +1,67 @@
+{% extends "dashboard/layout.html" %}
+{% block title %}Your sites - Patchwarden{% endblock %}
+{% block page %}
+<div class="card">
+  <h1>Your sites</h1>
+  <p class="muted">Logged in as {{ user.email }}. Nothing changes on a site until you approve it.</p>
+  <form method="post" action="/dashboard/watchdog/run" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary" type="submit">Run Watchdog checks now</button>
+  </form>
+  {% for row in rows %}
+  {% set site = row.site %}
+  <section class="block" id="site-{{ site.id }}">
+    <h2>{{ site.domain }}</h2>
+    <p>
+      {% if row.scan %}
+        <span class="badge risk-{{ row.scan.risk.value }}">{{ risk_labels[row.scan.risk.value] }}</span>
+        PHP {{ row.scan.detected_version or "hidden" }}, checked {{ row.scan.created_at.strftime("%b %-d, %H:%M UTC") }}.
+        <a href="{{ row.report_url }}">Read the report</a>
+      {% else %}Not scanned yet.{% endif %}
+    </p>
+    <p class="muted">Access: {{ site.access_method.value }}{% if site.credentials %} ({{ site.credentials | map(attribute="kind") | map(attribute="value") | join(", ") }} saved){% endif %}.
+       Pages we check: / {% for k, v in (site.check_paths or {}).items() %}, {{ v }}{% endfor %}</p>
+    {% if site.platform.value == "wordpress" %}<p><a class="btn" href="/dashboard/wp-guard/{{ site.id }}">WordPress Guard: safety score and Fix it</a></p>{% endif %}
+    <form method="post" action="/dashboard/sites/{{ site.id }}/scan" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary" type="submit">Scan now</button>
+    </form>
+    <form method="post" action="/dashboard/sites/{{ site.id }}/patch" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Plan a PHP update (dry run)</button>
+    </form>
+    <form method="post" action="/dashboard/sites/{{ site.id }}/migration" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary" type="submit">Plan a migration (PHP 8.2 and older)</button>
+    </form>
+    <form method="post" action="/dashboard/sites/{{ site.id }}/credentials" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <select name="kind">{% for k in kinds %}<option value="{{ k.value }}">{{ k.value }}</option>{% endfor %}</select>
+      <input name="value" type="password" placeholder="API token (never a password)" autocomplete="off" minlength="8" required>
+      <button class="secondary" type="submit">Save access token</button>
+    </form>
+    <p>Watchdog: {% if row.monitoring %}<span class="ok">on</span> (daily version check, hourly CVE check)
+       · <a href="/dashboard/sites/{{ site.id }}/monthly">Monthly report</a>{% else %}off{% endif %}</p>
+    <form method="post" action="/dashboard/sites/{{ site.id }}/monitoring" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="enabled" value="{{ 'false' if row.monitoring else 'true' }}">
+      <button class="secondary" type="submit">{{ "Turn monitoring off" if row.monitoring else "Turn monitoring on" }}</button>
+    </form>
+    {% if row.migrations %}<p class="muted">Migrations:
+      {% for m in row.migrations %}<a href="/dashboard/migrations/{{ m.id }}">#{{ m.id }} {{ m.from_version }} → {{ m.to_version }}: {{ m.state.value.replace("_", " ") }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+    {% if row.jobs %}<p class="muted">Recent changes:
+      {% for j in row.jobs %}<a href="/dashboard/patches/{{ j.id }}">#{{ j.id }} {{ j.from_version }} → {{ j.to_version }}: {{ state_labels[j.state.value] }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+  </section>
+  {% else %}
+  <p>No sites yet. Add one below.</p>
+  {% endfor %}
+
+  <section class="block">
+    <h2>Add a site</h2>
+    <form method="post" action="/dashboard/sites" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input name="domain" placeholder="example.com" required>
+      <select name="platform"><option value="custom">Custom PHP</option><option value="wordpress">WordPress</option></select>
+      <input name="login_path" placeholder="Login page, e.g. /login">
+      <input name="form_path" placeholder="Checkout / form page">
+      <button type="submit">Add site</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

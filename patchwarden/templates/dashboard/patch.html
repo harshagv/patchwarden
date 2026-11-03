@@ -1,0 +1,96 @@
+{% extends "dashboard/layout.html" %}
+{% block title %}PHP update #{{ job.id }} for {{ job.site.domain }}{% endblock %}
+{% block page %}
+{% if job.state.value == "running" %}<meta http-equiv="refresh" content="3">{% endif %}
+<div class="card">
+  <p class="muted">Patchwarden: before / after report #{{ job.id }}</p>
+  <h1>PHP update for {{ job.site.domain }}</h1>
+  <p><span class="badge state-{{ job.state.value }}">{{ state_labels[job.state.value] }}</span></p>
+  {% if report.message %}<p><strong>{{ report.message }}</strong></p>{% endif %}
+
+  <div class="grid">
+    <section class="block">
+      <h2>Versions</h2>
+      <p>Old version: <strong>PHP {{ job.from_version }}</strong> &nbsp;·&nbsp; Target: <strong>PHP {{ job.to_version }}</strong>
+      {% if report.after %} &nbsp;·&nbsp; Running after the change: <strong>PHP {{ report.after.php_version }}</strong>{% endif %}
+      {% if report.rollback and report.rollback.php_version %} &nbsp;·&nbsp; Running after rollback: <strong>PHP {{ report.rollback.php_version }}</strong>{% endif %}</p>
+    </section>
+
+    {% if job.state.value in ("dry_run", "awaiting_approval") %}
+    <section class="block">
+      <h2>What will happen if you approve</h2>
+      <p>{{ report.plan.changes_made }}</p>
+      <ol>{% for s in report.plan.steps %}<li>{{ s }}</li>{% endfor %}</ol>
+      <form method="post" action="/dashboard/patches/{{ job.id }}/approve" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit">Approve and run</button>
+      </form>
+      <p class="muted">Approving records your name and the time in the audit log.</p>
+    </section>
+    {% endif %}
+
+    {% if report.plan and report.plan.components %}
+    <section class="block">
+      <h2>Plugin and theme updates (run by the Patchwarden plugin)</h2>
+      <ul>{% for c in report.plan.components %}{% set done = (report.components or []) | selectattr("slug", "equalto", c.slug) | list %}
+        <li>{{ c.type }} {{ c.slug }}: {{ c.from_version or "?" }} → {{ c.fixed_in }} or newer
+          {% if done %}<span class="{{ 'ok' if done[0].state == 'done' else ('bad' if done[0].state == 'failed' else 'muted') }}">({{ done[0].state }}{% if done[0].result and done[0].result.version %}, now {{ done[0].result.version }}{% endif %})</span>{% endif %}</li>
+      {% endfor %}</ul>
+    </section>
+    {% endif %}
+
+    {% if report.before or report.after %}
+    <section class="block">
+      <h2>Tests</h2>
+      <table class="plain">
+        <tr><th>Page</th><th>Before</th><th>After</th>{% if report.rollback and report.rollback.checks %}<th>After rollback</th>{% endif %}</tr>
+        {% set rb = {} %}
+        {% if report.rollback and report.rollback.checks %}{% for c in report.rollback.checks %}{% set _ = rb.update({c.path: c}) %}{% endfor %}{% endif %}
+        {% for c in checks %}
+        <tr><td>{{ c.label }} ({{ c.path }})</td>
+          {% for r in [c.before, c.after] %}<td>{% if r %}<span class="{{ 'ok' if r.ok else 'bad' }}">{{ "Passed" if r.ok else "Failed" }}</span> ({{ r.status or r.detail }}){% else %}-{% endif %}</td>{% endfor %}
+          {% if rb %}<td>{% set r = rb.get(c.path) %}{% if r %}<span class="{{ 'ok' if r.ok else 'bad' }}">{{ "Passed" if r.ok else "Failed" }}</span> ({{ r.status or r.detail }}){% endif %}</td>{% endif %}
+        </tr>
+        {% endfor %}
+      </table>
+    </section>
+    {% endif %}
+
+    {% if report.rollback %}
+    <section class="block">
+      <h2>Rollback</h2>
+      <p>{{ "Started automatically" if report.rollback.trigger == "automatic" else "Started by the owner" }} because {{ report.rollback.reason }}.
+         {% if report.rollback.ok %}<span class="ok">The backup was restored and the old version is back.</span>{% elif report.rollback.ok is defined %}<span class="bad">The rollback did not finish cleanly.</span>{% endif %}</p>
+    </section>
+    {% endif %}
+
+    {% if report.backup %}
+    <section class="block">
+      <h2>Backup</h2>
+      <p>Location: {{ report.backup.location }}<br>
+         Checksum (SHA-256): <code>{{ report.backup.checksum }}</code><br>
+         Verified: {{ "yes" if report.backup.verified else "no" }}. {{ report.backup.restore_dry_run }}</p>
+    </section>
+    {% endif %}
+
+    <section class="block">
+      <h2>Record</h2>
+      <p>Dry run: {{ report.dry_run_at }}<br>
+         Approved by: {{ approver.email if approver else "not approved yet" }}{% if job.approved_at %} at {{ job.approved_at.isoformat() }}{% endif %}<br>
+         {% if report.finished_at %}Finished: {{ report.finished_at }}{% endif %}</p>
+      {% if report.steps %}<ol>{% for s in report.steps %}<li><span class="{{ 'ok' if s.ok else 'bad' }}">{{ s.step }}</span>: {{ s.detail }} <span class="muted">({{ s.at }})</span></li>{% endfor %}</ol>{% endif %}
+    </section>
+
+    {% if job.state.value == "succeeded" %}
+    <section class="block noprint">
+      <form method="post" action="/dashboard/patches/{{ job.id }}/rollback" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="danger" type="submit">Roll back to PHP {{ job.from_version }}</button>
+      </form>
+      <p class="muted">Restores the backup above and switches PHP back.</p>
+    </section>
+    {% endif %}
+  </div>
+  <footer>To keep a copy, use your browser's Print or Save as PDF.</footer>
+</div>
+{% endblock %}

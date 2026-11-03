@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Log in to Patchwarden{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Log in to Patchwarden</h1>
+  {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/dashboard/login" class="grid">
+    <label>Email<br><input name="email" type="email" autocomplete="username" required></label>
+    <label>Password<br><input name="password" type="password" autocomplete="current-password" required></label>
+    <p><button type="submit">Log in</button></p>
+  </form>
+  <p class="muted">No account yet? Create one with POST /api/auth/register.</p>
+</div>
+{% endblock %}

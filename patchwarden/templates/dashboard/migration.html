@@ -1,0 +1,79 @@
+{% extends "dashboard/layout.html" %}
+{% block title %}Migration #{{ mig.id }} for {{ mig.site.domain }}{% endblock %}
+{% block page %}
+{% if mig.state.value in ("staging_running", "promoting") %}<meta http-equiv="refresh" content="3">{% endif %}
+{% set b = mig.breakage %}{% set p = mig.plan %}{% set st = mig.staging_report %}
+<div class="card">
+  <p class="muted">Patchwarden: migration plan and breakage report #{{ mig.id }}</p>
+  <h1>Move {{ mig.site.domain }} from PHP {{ mig.from_version }} to {{ mig.to_version }}</h1>
+  <p><span class="badge state-{{ 'succeeded' if mig.state.value == 'promoted' else ('failed' if 'failed' in mig.state.value else 'dry_run') }}">{{ labels[mig.state.value] }}</span></p>
+
+  <div class="grid">
+    <section class="block">
+      <h2>The plan</h2>
+      <p>Target: <strong>PHP {{ p.target_version }}</strong> · Effort: <strong>{{ p.effort }}</strong> ({{ p.effort_note }})</p>
+      <ol>{% for s in p.steps %}<li>{{ s }}</li>{% endfor %}</ol>
+    </section>
+
+    <section class="block">
+      <h2>What breaks ({{ b.errors }} breaking, {{ b.warnings }} to review)</h2>
+      <p class="muted">Scanned {{ b.files_scanned }} PHP files{% if b.skipped_wordpress_core %}, skipped {{ b.skipped_wordpress_core }} WordPress core files (update WordPress itself){% endif %}{% if mig.source == "upload" %}, from an uploaded zip{% endif %}.</p>
+      {% if p.fixes %}
+      <ol>{% for f in p.fixes %}
+        <li><strong>{{ f.title }}</strong> <span class="{{ 'bad' if f.severity == 'error' else 'muted' }}">({{ "breaks" if f.severity == "error" else "review" }} in PHP {{ f.since }})</span><br>
+          {{ f.fix }} <em>{{ f.who }}.</em><br>
+          <span class="muted">{{ f.where | join(", ") }}</span></li>
+      {% endfor %}</ol>
+      <table class="plain">
+        <tr><th>File</th><th>Line</th><th>Found</th><th>Code</th></tr>
+        {% for h in b.hits %}<tr><td>{{ h.file }}</td><td>{{ h.line }}</td><td class="{{ 'bad' if h.severity == 'error' else '' }}">{{ h.found }}</td><td><code>{{ h.code }}</code></td></tr>{% endfor %}
+      </table>
+      {% else %}<p class="ok">No breaking changes found in the site's own code.</p>{% endif %}
+    </section>
+
+    {% if st %}
+    <section class="block">
+      <h2>Staging test {{ "passed" if st.passed else "not passed" }}</h2>
+      <p>{{ st.message }}</p>
+      {% if st.staging_domain %}<p class="muted">Staging site: {{ st.staging_domain }}{% if st.php_version %} · runs PHP {{ st.php_version }}{% endif %}</p>{% endif %}
+      {% if st.auto_fixes %}<p>Automatic fixes applied on staging:</p><ul>{% for a in st.auto_fixes %}<li>{{ a.file }}:{{ a.line }}: {{ a.title }}</li>{% endfor %}</ul>{% endif %}
+      {% if st.checks %}<p>{% for c in st.checks %}<span class="{{ 'ok' if c.ok else 'bad' }}">{{ c.label }} {{ c.path }}: {{ "passed" if c.ok else "failed" }} ({{ c.status or c.detail }})</span>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+      {% if st.remaining and st.remaining.errors %}<p class="bad">Still to fix on staging:</p><ul>{% for h in st.remaining.hits if h.severity == "error" %}<li>{{ h.file }}:{{ h.line }}: {{ h.title }}. {{ h.fix }}</li>{% endfor %}</ul>{% endif %}
+      <ol class="muted">{% for s in st.steps %}<li>{{ s.step }}: {{ s.detail }}</li>{% endfor %}</ol>
+    </section>
+    {% endif %}
+
+    <section class="block noprint">
+      {% if mig.state.value in ("planned", "staging_failed", "staging_passed", "signed_off", "promotion_failed") %}
+      <form method="post" action="/dashboard/migrations/{{ mig.id }}/staging" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="{{ 'secondary' if mig.state.value in ('staging_passed', 'signed_off') else '' }}" type="submit">{{ "Run staging tests" if not st else "Run staging tests again" }}</button>
+      </form>
+      {% endif %}
+      {% if mig.state.value == "staging_passed" %}
+      <form method="post" action="/dashboard/migrations/{{ mig.id }}/signoff" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label><input type="checkbox" name="confirm" value="yes" required> I checked the staging site and it works</label>
+        <button type="submit">Sign off</button>
+      </form>
+      {% endif %}
+      {% if mig.state.value == "signed_off" %}
+      <form method="post" action="/dashboard/migrations/{{ mig.id }}/promote" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="danger" type="submit">Promote to production</button>
+      </form>
+      <p class="muted">Production is backed up first and rolled back automatically if any check fails.</p>
+      {% endif %}
+    </section>
+
+    <section class="block">
+      <h2>Record</h2>
+      <p>Planned: {{ mig.created_at.isoformat() }}<br>
+         Signed off by: {{ signer.email if signer else "not signed off" }}{% if mig.signed_off_at %} at {{ mig.signed_off_at.isoformat() }}{% endif %}<br>
+         {% if mig.promotion %}Promotion: {{ mig.promotion.outcome or "running" }}{% if mig.promotion.message %}: {{ mig.promotion.message }}{% endif %}
+           {% if mig.patch_job_id %}<br><a href="/dashboard/patches/{{ mig.patch_job_id }}">Before / after report for production</a>{% endif %}{% endif %}</p>
+    </section>
+  </div>
+  <footer>To keep a copy of the plan, use your browser's Print or Save as PDF.</footer>
+</div>
+{% endblock %}

@@ -1,0 +1,34 @@
+{
+  "name": "PHP Guard demo feed (WPScan-style, made-up entries)",
+  "demo": true,
+  "note": "Demo data only. IDs and slugs are fictional. Point WP_VULN_FEED_PATH at a real WPScan-format export to use real data.",
+  "vulnerabilities": [
+    {
+      "id": "PHPG-DEMO-2026-0001",
+      "cve": null,
+      "type": "plugin",
+      "slug": "demo-contact-form",
+      "title": "Unauthenticated file upload in contact form attachments",
+      "fixed_in": "2.4.1",
+      "severity": "critical"
+    },
+    {
+      "id": "PHPG-DEMO-2026-0002",
+      "cve": null,
+      "type": "plugin",
+      "slug": "demo-gallery",
+      "title": "Stored cross-site scripting in gallery captions",
+      "fixed_in": "1.9.0",
+      "severity": "medium"
+    },
+    {
+      "id": "PHPG-DEMO-2026-0003",
+      "cve": null,
+      "type": "theme",
+      "slug": "demo-storefront",
+      "title": "Reflected cross-site scripting in search template",
+      "fixed_in": "3.2.0",
+      "severity": "medium"
+    }
+  ]
+}

@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Patchwarden · A warden for every PHP site you look after</title>
+<meta name="description" content="Patchwarden finds PHP websites exposed to PHP2Shell, fixes them with the owner's approval, and watches them every day after. Self-hosted. No passwords.">
+<meta property="og:title" content="Patchwarden · A warden for every PHP site you look after">
+<meta property="og:description" content="Find, fix and watch every PHP site at risk from PHP2Shell, without ever asking for a password.">
+<meta property="og:url" content="https://patchwarden.harshagv.me/">
+<link rel="canonical" href="https://patchwarden.harshagv.me/">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="nav">
+  <a class="brand" href="./"><img src="assets/favicon.svg" alt="" width="26" height="26"> Patchwarden</a>
+  <nav class="nav__links" aria-label="Sections">
+    <a href="#how">How it works</a>
+    <a href="#agents">Agents</a>
+    <a href="#screens">Screens</a>
+    <a href="#run">Run it</a>
+    <a href="docs/">Docs</a>
+    <a href="https://github.com/harshagv/patchwarden" rel="noopener">GitHub</a>
+  </nav>
+  <a class="button button--small" href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access</a>
+</header>
+
+<main>
+
+<section class="hero">
+  <p class="eyebrow">PHP2Shell · CVE-2026-109618 · CVE-2026-109619</p>
+  <h1 class="display">A warden for every PHP site you look after.</h1>
+  <p class="lede">Patchwarden finds the PHP websites exposed to PHP2Shell, fixes them with the owner's approval,
+    and watches them every day after. Self-hosted. No passwords. Nothing changes until someone says yes.</p>
+  <div class="actions">
+    <a class="button" href="#screens">See what owners get</a>
+    <a class="button button--ghost" href="https://github.com/harshagv/patchwarden" rel="noopener">Get the code</a>
+  </div>
+  <ul class="facts" aria-label="Key facts">
+    <li><strong>CVSS 9.2</strong><span>Take over a site without logging in</span></li>
+    <li><strong>Exploited</strong><span>In CISA's KEV catalog since Oct 26, 2026</span></li>
+    <li><strong>Fixed in</strong><span>8.5.12 · 8.4.27 · 8.3.36 · 8.2.35</span></li>
+    <li><strong>Dec 31, 2026</strong><span>PHP 8.2 loses all security fixes</span></li>
+  </ul>
+</section>
+
+<section class="section" id="how">
+  <header class="section__head reveal">
+    <p class="eyebrow">How it works</p>
+    <h2 class="display">From a free scan to a site that stays safe.</h2>
+  </header>
+  <ol class="steps">
+    <li class="reveal">
+      <span class="steps__n">1</span>
+      <h3>Scan it from the outside.</h3>
+      <p>Enter a domain, or upload a CSV of every client site. Each one gets a one-page report an owner can read:
+        <em>your version, your risk, what to do next</em>. A hidden version is reported as unknown, never guessed.</p>
+    </li>
+    <li class="reveal">
+      <span class="steps__n">2</span>
+      <h3>Approve the fix.</h3>
+      <p>Every update starts as a dry run that lists exactly what will happen. Once the owner approves, Patchwarden
+        backs up, updates, restarts and checks the homepage, login and checkout pages.</p>
+    </li>
+    <li class="reveal">
+      <span class="steps__n">3</span>
+      <h3>Let it keep watch.</h3>
+      <p>Protected sites are re-checked every day, and every new PHP flaw is matched against them every hour.
+        The owner hears about a new risk the day it appears, and gets a safety report every month.</p>
+    </li>
+    <li class="reveal">
+      <span class="steps__n">4</span>
+      <h3>Move what can't be patched.</h3>
+      <p>PHP 8.1 and older have no fix. Patchwarden finds the code that will break, down to the file and line,
+        tests the move on a staging copy, and goes live only after the owner signs off.</p>
+    </li>
+  </ol>
+</section>
+
+<section class="band">
+  <div class="band__inner reveal">
+    <h2 class="display">It never changes a site you haven't approved.</h2>
+    <p>Every change starts as a dry run, is backed up first, and puts itself back if the homepage, login or
+      checkout stops working, with a before/after report to prove it.</p>
+  </div>
+</section>
+
+<section class="section" id="agents">
+  <header class="section__head reveal">
+    <p class="eyebrow">The agents</p>
+    <h2 class="display">Five agents. One is free, four earn.</h2>
+    <p class="section__sub">The free scan finds the customer. The Patch agent fixes them once, the Watchdog keeps
+      them safe every month, and the Migration agent takes on the big projects.</p>
+  </header>
+  <div class="grid">
+    <article class="card reveal">
+      <p class="tag tag--free">Free</p>
+      <h3>Scanner</h3>
+      <p>An outside check of any site, or of a whole CSV of sites. It gives a one-page report with a signed link the owner can forward.</p>
+      <dl><dt>Needs</dt><dd>Nothing</dd><dt>Earns</dt><dd>Your leads</dd></dl>
+    </article>
+    <article class="card reveal">
+      <p class="tag">Per site</p>
+      <h3>Patch</h3>
+      <p>Backup, update, restart, test, and automatic rollback. A dry run comes first, and the owner's approval is always on record.</p>
+      <dl><dt>Needs</dt><dd>A cPanel or Plesk API token</dd><dt>Earns</dt><dd>A one-time fee per site</dd></dl>
+    </article>
+    <article class="card reveal">
+      <p class="tag">Monthly</p>
+      <h3>Watchdog</h3>
+      <p>A version check every day and new-CVE matching every hour. Plain-language alerts arrive by email, and a safety report every month.</p>
+      <dl><dt>Needs</dt><dd>Nothing (or the read-only plugin)</dd><dt>Earns</dt><dd>A monthly fee per site</dd></dl>
+    </article>
+    <article class="card reveal">
+      <p class="tag">Project</p>
+      <h3>Migration</h3>
+      <p>A breakage report with file and line, an ordered fix plan with an effort estimate, staging tests, then sign-off and go-live.</p>
+      <dl><dt>Needs</dt><dd>A panel token and a staging copy</dd><dt>Earns</dt><dd>A project price</dd></dl>
+    </article>
+    <article class="card reveal">
+      <p class="tag">Per site · monthly</p>
+      <h3>WordPress Guard</h3>
+      <p>Scan, patch and watch in one product: a safety score, a fix list without jargon, and one <em>Fix it</em> button.</p>
+      <dl><dt>Needs</dt><dd>The Patchwarden plugin</dd><dt>Earns</dt><dd>A monthly fee, at volume</dd></dl>
+    </article>
+    <article class="card card--accent reveal">
+      <h3>Made for people who look after many sites</h3>
+      <p>Agencies, hosting resellers, freelancers and managed-service providers. Scan your whole client list in one
+        upload, then offer the fix and the monthly watch.</p>
+      <a class="link" href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access →</a>
+    </article>
+  </div>
+</section>
+
+<section class="section section--alt" id="trust">
+  <header class="section__head reveal">
+    <p class="eyebrow">Trust</p>
+    <h2 class="display">The owner holds the keys.</h2>
+    <p class="section__sub">These rules are enforced in the code and covered by automated tests, not just written in a policy.</p>
+  </header>
+  <div class="grid grid--trust">
+    <div class="reveal"><h3>No password, ever.</h3><p>Owners give an API token they create in their hosting panel, or install the plugin. Tokens are encrypted, and never shown again.</p></div>
+    <div class="reveal"><h3>Approval on the record.</h3><p>Who approved, and when, is saved before anything runs. Every action lands in an audit log.</p></div>
+    <div class="reveal"><h3>Backups you can prove.</h3><p>Each backup is checked by checksum and a restore dry-run. If the backup fails, nothing changes.</p></div>
+    <div class="reveal"><h3>Revocable in one click.</h3><p>Delete the token or uninstall the plugin, and access ends on both sides.</p></div>
+    <div class="reveal"><h3>Nothing leaks.</h3><p>Canary tests prove no credential reaches a response, report, alert, email or log.</p></div>
+    <div class="reveal"><h3>No AI guessing.</h3><p>The agents are deterministic checkers. A hidden version stays "unknown" until it can be checked from the inside.</p></div>
+  </div>
+</section>
+
+<section class="section" id="screens">
+  <header class="section__head section__head--center reveal">
+    <p class="eyebrow">Screens</p>
+    <h2 class="display">Reports an owner can actually read.</h2>
+    <p class="section__sub">Real pages from the Patchwarden demo sites. Pick one to look around.</p>
+  </header>
+  <div class="screens reveal">
+    <div class="screens__tabs" role="tablist" aria-label="Example screens">
+      <button role="tab" aria-selected="true" data-src="examples/report.html">1-page report</button>
+      <button role="tab" aria-selected="false" data-src="examples/patch.html">Before / after</button>
+      <button role="tab" aria-selected="false" data-src="examples/rollback.html">Automatic rollback</button>
+      <button role="tab" aria-selected="false" data-src="examples/migration.html">Migration plan</button>
+      <button role="tab" aria-selected="false" data-src="examples/wp-guard.html">WordPress Guard</button>
+      <button role="tab" aria-selected="false" data-src="examples/alerts.html">Alerts</button>
+    </div>
+    <div class="browser">
+      <div class="browser__bar"><span></span><span></span><span></span><p class="browser__url">patchwarden · example</p>
+        <a class="browser__open" href="examples/report.html" target="_blank" rel="noopener">Open full page ↗</a></div>
+      <iframe class="browser__frame" src="examples/report.html" title="Example Patchwarden screen" loading="lazy"></iframe>
+    </div>
+    <noscript><p class="center">Open the examples: <a href="examples/report.html">report</a> · <a href="examples/patch.html">before/after</a> ·
+      <a href="examples/rollback.html">rollback</a> · <a href="examples/migration.html">migration</a> ·
+      <a href="examples/wp-guard.html">WordPress Guard</a> · <a href="examples/alerts.html">alerts</a></p></noscript>
+  </div>
+</section>
+
+<section class="section section--alt" id="run">
+  <header class="section__head reveal">
+    <p class="eyebrow">Run it</p>
+    <h2 class="display">Running in three steps.</h2>
+    <p class="section__sub">Patchwarden is one web app plus PostgreSQL, packaged for Docker. It runs natively on Apple Silicon and x86.</p>
+  </header>
+  <ol class="timeline">
+    <li class="reveal">
+      <h3>Get it, and make your secrets.</h3>
+      <p>Get the code, then write a private <code>.env</code> with generated values for the token key, the encryption key and the database password. It never goes into git.</p>
+      <pre><code>git clone https://github.com/harshagv/patchwarden.git
+cd patchwarden
+make env</code></pre>
+    </li>
+    <li class="reveal">
+      <h3>Point it at your domain.</h3>
+      <p>Set <code>PUBLIC_BASE_URL</code> in <code>.env</code> to your HTTPS address, and add SMTP if you want alerts by email. Then check the settings: in production, Patchwarden refuses to start and names any missing secret.</p>
+      <pre><code>make check-config</code></pre>
+    </li>
+    <li class="reveal">
+      <h3>Start it.</h3>
+      <p>It listens on <code>127.0.0.1:8000</code>, so put it behind your HTTPS reverse proxy. Site owners download the WordPress plugin from their dashboard, already set up for your address.</p>
+      <pre><code>make up</code></pre>
+    </li>
+  </ol>
+  <div class="note reveal">
+    <h3>Try it first, on your laptop</h3>
+    <p><code>make dev</code> starts Patchwarden with built-in demo websites and pretend hosting panels, so you need no accounts and no secrets.
+      Patch a site, watch one roll itself back, and plan a migration from PHP 7.4, all in about five minutes.
+      The <a href="docs/#run-it">guide</a> walks through it.</p>
+  </div>
+</section>
+
+<section class="section" id="status">
+  <header class="section__head reveal">
+    <p class="eyebrow">Status</p>
+    <h2 class="display">What is ready today.</h2>
+    <p class="section__sub">Patchwarden is a preview release. Here is exactly what works, so you can be straight with your customers.</p>
+  </header>
+  <div class="table-wrap reveal">
+    <table class="status">
+      <thead><tr><th>Area</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>Scanner, one-page reports, CSV bulk scans, WordPress plugin and theme check</td><td><span class="pill pill--ok">Ready</span></td></tr>
+        <tr><td>Approval, backup, checks, automatic rollback and audit log</td><td><span class="pill pill--ok">Ready</span> tested against simulated hosting panels</td></tr>
+        <tr><td>Watchdog: daily checks, CVE and release matching, alerts, monthly reports</td><td><span class="pill pill--ok">Ready</span></td></tr>
+        <tr><td>Migration: breakage scan, plan, staging, sign-off, promotion</td><td><span class="pill pill--ok">Ready</span> tested against simulated hosting</td></tr>
+        <tr><td>WordPress plugin</td><td><span class="pill pill--ok">Ready</span> not yet tested inside a full WordPress install</td></tr>
+        <tr><td>Real cPanel and Plesk connections</td><td><span class="pill pill--wait">Not connected yet</span> the interface is ready, and the connectors refuse to act rather than pretend</td></tr>
+        <tr><td>Docker deployment</td><td><span class="pill pill--wait">Written, not yet run end to end</span></td></tr>
+        <tr><td>Payments and agency white-label billing</td><td><span class="pill pill--no">Not in this release</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="finale">
+  <div class="reveal">
+    <h2 class="display">Put a warden on every site you look after.</h2>
+    <p>Patchwarden is open source and in preview. Run it yourself, or tell me about the sites you look after.</p>
+    <div class="actions actions--center">
+      <a class="button button--light" href="https://github.com/harshagv/patchwarden" rel="noopener">Get the code</a>
+      <a class="button button--ghost-light" href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="footer__cols">
+    <div>
+      <a class="brand" href="./"><img src="assets/favicon.svg" alt="" width="22" height="22"> Patchwarden</a>
+      <p class="footer__note">Find, fix and watch every PHP site at risk, without ever asking for a password.</p>
+    </div>
+    <nav aria-label="Project"><h2>Project</h2>
+      <a href="#how">How it works</a><a href="#agents">Agents</a><a href="#status">What is ready today</a>
+      <a href="https://github.com/harshagv/patchwarden" rel="noopener">Source code</a>
+      <a href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access</a></nav>
+    <nav aria-label="Documentation"><h2>Documentation</h2>
+      <a href="docs/">Technical guide</a><a href="docs/#run-it">Quick start</a>
+      <a href="docs/#the-approval-and-rollback-flow">Approval and rollback</a>
+      <a href="docs/#wordpress-guard-phase-5">WordPress plugin</a></nav>
+    <nav aria-label="Trust"><h2>Trust</h2>
+      <a href="#trust">Trust rules</a><a href="docs/#credentials-and-logs">Security</a>
+      <a href="docs/#secrets">Secrets and settings</a></nav>
+  </div>
+  <p class="footer__legal">This site sets no cookies and loads nothing from third parties. · Open source under the MIT licence. · Patchwarden is not
+    affiliated with The PHP Group. PHP is a trademark of The PHP Group. · <a href="https://www.harshagv.me/">harshagv.me</a></p>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

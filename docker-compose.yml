@@ -1,0 +1,31 @@
+# Full stack: app + PostgreSQL. Run `make env` first to create .env with secrets.
+services:
+  db:
+    image: postgres:16-alpine  # multi-arch, arm64 native
+    environment:
+      POSTGRES_USER: patchwarden
+      POSTGRES_DB: patchwarden
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (run make env)}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U patchwarden -d patchwarden"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    env_file: .env
+    environment:
+      APP_ENV: ${COMPOSE_APP_ENV:-production}
+      DATABASE_URL: postgresql://patchwarden:${POSTGRES_PASSWORD}@db:5432/patchwarden
+      DEMO_SITES: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  pgdata:

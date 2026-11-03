@@ -1,0 +1,36 @@
+{% extends "dashboard/layout.html" %}
+{% block title %}Monthly safety report: {{ site.domain }} {{ report.month }}{% endblock %}
+{% block page %}
+<div class="card">
+  <p class="muted">Patchwarden monthly safety report · {{ report.month }}</p>
+  <h1>{{ site.domain }}</h1>
+  <p><strong>{{ report.summary }}</strong></p>
+  <div class="grid">
+    <section class="block">
+      <h2>Your site today</h2>
+      <p>PHP {{ report.current.php_version or "hidden" }} ·
+         <span class="badge risk-{{ report.current.risk }}">{{ risk_labels[report.current.risk] }}</span></p>
+    </section>
+    <section class="block">
+      <h2>Checks run</h2>
+      <p>{{ report.checks.version }} version checks on {{ report.checks.days_checked }} of {{ report.checks.days_in_month }} days,
+         and {{ report.checks.cve }} checks against new security flaws.
+         {% if report.checks.failed %}{{ report.checks.failed }} checks could not reach the site.{% endif %}</p>
+    </section>
+    <section class="block">
+      <h2>Risks found</h2>
+      {% if report.risks_found %}<ul>{% for r in report.risks_found %}
+        <li>{{ r.created_at[:10] }}: {{ r.severity }}. {{ r.message.split("\n")[0].replace("What changed: ", "") }}</li>
+      {% endfor %}</ul>{% else %}<p>No new risks this month.</p>{% endif %}
+      {% if report.open_alerts %}<p class="muted">{{ report.open_alerts }} alert(s) are still unread. <a href="/dashboard/alerts">Read them</a>.</p>{% endif %}
+    </section>
+    <section class="block">
+      <h2>Actions taken</h2>
+      {% if report.actions_taken %}<ul>{% for a in report.actions_taken %}
+        <li><a href="/dashboard/patches/{{ a.patch_job_id }}">PHP {{ a.from_version }} → {{ a.to_version }}</a>: {{ state_labels[a.state] }} ({{ a.created_at[:10] }})</li>
+      {% endfor %}</ul>{% else %}<p>No changes were made this month.</p>{% endif %}
+    </section>
+  </div>
+  <footer>To keep a copy, use your browser's Print or Save as PDF.</footer>
+</div>
+{% endblock %}

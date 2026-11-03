@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest==9.2.0
+# Builds the website's docs page (make site)
+markdown==3.10

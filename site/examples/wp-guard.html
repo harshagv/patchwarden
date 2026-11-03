@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="robots" content="noindex">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>WordPress Guard: wpshop84.demo.patchwarden.test</title>
+<style>
+  :root { --ink:#1d2330; --muted:#5b6475; --line:#dfe3ea; --bg:#f6f7f9; --card:#fff;
+          --safe:#1f7a4d; --patch:#b25e00; --migrate:#b3261e; --unknown:#4b5563; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width:760px; margin:32px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:28px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  h2 { font-size:1.05rem; margin:0 0 6px; text-transform:none; }
+  .muted { color:var(--muted); font-size:.92rem; }
+  .badge { display:inline-block; padding:6px 14px; border-radius:999px; color:#fff; font-weight:600; }
+  .risk-safe { background:var(--safe); } .risk-patch_now { background:var(--patch); }
+  .risk-must_migrate { background:var(--migrate); } .risk-unknown { background:var(--unknown); }
+  .grid { display:grid; gap:18px; margin-top:22px; }
+  .block { border-top:1px solid var(--line); padding-top:16px; }
+  .big { font-size:1.35rem; font-weight:600; }
+  ul { padding-left:20px; margin:6px 0; }
+  details { margin-top:22px; font-size:.88rem; color:var(--muted); }
+  table { border-collapse:collapse; width:100%; font-family:ui-monospace, Menlo, monospace; font-size:.8rem; }
+  td { border-top:1px solid var(--line); padding:4px 6px; vertical-align:top; word-break:break-all; }
+  footer { margin-top:18px; font-size:.82rem; color:var(--muted); }
+  .wide { max-width:980px; }
+  nav { display:flex; gap:16px; align-items:center; margin-bottom:18px; }
+  nav .grow { flex:1; font-weight:700; }
+  button, .btn { font:inherit; padding:8px 16px; border-radius:8px; border:1px solid var(--ink);
+                 background:var(--ink); color:#fff; cursor:pointer; text-decoration:none; }
+  button.secondary { background:#fff; color:var(--ink); }
+  button.danger { background:var(--migrate); border-color:var(--migrate); }
+  input, select { font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:8px; }
+  form.inline { display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center; margin:4px 0; }
+  .alert { background:#fdecea; border:1px solid #f5c2bd; color:var(--migrate); padding:10px 14px; border-radius:8px; }
+  .ok { color:var(--safe); font-weight:600; } .bad { color:var(--migrate); font-weight:600; }
+  .state-succeeded { background:var(--safe); } .state-failed, .state-rolled_back { background:var(--migrate); }
+  .state-dry_run, .state-awaiting_approval, .state-running { background:var(--patch); }
+  table.plain { font-family:inherit; font-size:.92rem; } table.plain th { text-align:left; padding:4px 6px; }
+  @media print { body { background:#fff; } main { margin:0; } .card { border:none; padding:0; }
+                 details, nav, form, .noprint { display:none !important; } }
+</style>
+<style>.pw-example{position:sticky;top:0;z-index:9;background:#1d1c1a;color:#f0ede7;font:13px/1.4 system-ui,sans-serif;padding:8px 14px;text-align:center}.pw-example a{color:#dfa592;pointer-events:auto}form,button,input,select,main a,nav a{pointer-events:none}</style></head>
+<body><div class="pw-example">Example output from the Patchwarden demo sites · buttons are disabled · <a href="../#screens" target="_top">back to the overview</a></div><main class="wide">
+<nav>
+  <span class="grow">Patchwarden</span>
+  <a href="#">Your sites</a>
+  <a href="#">Alerts</a>
+  <form method="post" action="/dashboard/logout" class="inline"><button class="secondary" type="submit">Log out</button></form>
+</nav>
+
+
+<div class="card">
+  <p class="muted">WordPress Guard</p>
+  <h1>wpshop84.demo.patchwarden.test</h1>
+
+  <div class="grid">
+    <section class="block">
+      <h2>Your safety score</h2>
+      <p class="big"><span class="badge risk-patch_now">60 / 100 · Needs attention</span></p>
+      <p class="muted">Last checked 2026-11-03 15:14 UTC, from the outside scan.
+         Your site runs PHP 8.4.13.</p>
+    </section>
+
+    <section class="block">
+      <h2>What to fix</h2>
+      <ul><li><strong>Your PHP (8.4.13) has the serious flaw that lets attackers take over websites.</strong><br>Update PHP to 8.4.27. Press Fix it: you approve before anything changes.</li><li><strong>The Patchwarden plugin is not connected yet.</strong><br>Download the plugin, upload it in WordPress (Plugins &gt; Add New &gt; Upload), and paste your key.</li></ul>
+      
+      
+      <form method="post" action="/dashboard/wp-guard/5/fix" class="inline">
+        <input type="hidden" name="csrf" value="example">
+        <button type="submit">Fix it</button>
+      </form>
+      <p class="muted">Fix it shows you exactly what will change. Nothing happens until you approve it.</p>
+      
+    </section>
+
+    <section class="block">
+      <h2>Daily guard</h2>
+      <p><span class="ok">On.</span> We check your site every day and tell you the day a new risk appears.
+         <a href="#">Monthly report</a></p>
+      <form method="post" action="/dashboard/wp-guard/5/enable" class="inline">
+        <input type="hidden" name="csrf" value="example">
+        <input type="hidden" name="enabled" value="false">
+        <button class="secondary" type="submit">Turn WordPress Guard off</button>
+      </form>
+    </section>
+
+    <section class="block">
+      <h2>The Patchwarden plugin</h2>
+      
+        <ol>
+          <li><a href="#">Download the plugin</a>.</li>
+          <li>In WordPress: Plugins &gt; Add New &gt; Upload Plugin, choose patchwarden.zip, Install, Activate.</li>
+          <li>Press "Get your plugin key" below and copy it.</li>
+          <li>In WordPress: Settings &gt; Patchwarden, paste the key, press "Save and connect". Done.</li>
+        </ol>
+      
+      
+      <form method="post" action="/dashboard/wp-guard/5/key" class="inline">
+        <input type="hidden" name="csrf" value="example">
+        <button class="secondary" type="submit">Get your plugin key</button>
+      </form>
+      <p class="muted">The plugin never asks for a password. Deleting it in WordPress removes its settings and switches its key off.</p>
+    </section>
+  </div>
+</div>
+
+</main></body>
+</html>

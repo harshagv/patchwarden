@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="robots" content="noindex">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>PHP safety report: php84-unpatched.demo.patchwarden.test</title>
+<style>
+  :root { --ink:#1d2330; --muted:#5b6475; --line:#dfe3ea; --bg:#f6f7f9; --card:#fff;
+          --safe:#1f7a4d; --patch:#b25e00; --migrate:#b3261e; --unknown:#4b5563; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width:760px; margin:32px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:28px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  h2 { font-size:1.05rem; margin:0 0 6px; text-transform:none; }
+  .muted { color:var(--muted); font-size:.92rem; }
+  .badge { display:inline-block; padding:6px 14px; border-radius:999px; color:#fff; font-weight:600; }
+  .risk-safe { background:var(--safe); } .risk-patch_now { background:var(--patch); }
+  .risk-must_migrate { background:var(--migrate); } .risk-unknown { background:var(--unknown); }
+  .grid { display:grid; gap:18px; margin-top:22px; }
+  .block { border-top:1px solid var(--line); padding-top:16px; }
+  .big { font-size:1.35rem; font-weight:600; }
+  ul { padding-left:20px; margin:6px 0; }
+  details { margin-top:22px; font-size:.88rem; color:var(--muted); }
+  table { border-collapse:collapse; width:100%; font-family:ui-monospace, Menlo, monospace; font-size:.8rem; }
+  td { border-top:1px solid var(--line); padding:4px 6px; vertical-align:top; word-break:break-all; }
+  footer { margin-top:18px; font-size:.82rem; color:var(--muted); }
+  .wide { max-width:980px; }
+  nav { display:flex; gap:16px; align-items:center; margin-bottom:18px; }
+  nav .grow { flex:1; font-weight:700; }
+  button, .btn { font:inherit; padding:8px 16px; border-radius:8px; border:1px solid var(--ink);
+                 background:var(--ink); color:#fff; cursor:pointer; text-decoration:none; }
+  button.secondary { background:#fff; color:var(--ink); }
+  button.danger { background:var(--migrate); border-color:var(--migrate); }
+  input, select { font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:8px; }
+  form.inline { display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center; margin:4px 0; }
+  .alert { background:#fdecea; border:1px solid #f5c2bd; color:var(--migrate); padding:10px 14px; border-radius:8px; }
+  .ok { color:var(--safe); font-weight:600; } .bad { color:var(--migrate); font-weight:600; }
+  .state-succeeded { background:var(--safe); } .state-failed, .state-rolled_back { background:var(--migrate); }
+  .state-dry_run, .state-awaiting_approval, .state-running { background:var(--patch); }
+  table.plain { font-family:inherit; font-size:.92rem; } table.plain th { text-align:left; padding:4px 6px; }
+  @media print { body { background:#fff; } main { margin:0; } .card { border:none; padding:0; }
+                 details, nav, form, .noprint { display:none !important; } }
+</style>
+<style>.pw-example{position:sticky;top:0;z-index:9;background:#1d1c1a;color:#f0ede7;font:13px/1.4 system-ui,sans-serif;padding:8px 14px;text-align:center}.pw-example a{color:#dfa592;pointer-events:auto}form,button,input,select,main a,nav a{pointer-events:none}</style></head>
+<body><div class="pw-example">Example output from the Patchwarden demo sites · buttons are disabled · <a href="../#screens" target="_top">back to the overview</a></div><main class="">
+<div class="card">
+  <p class="muted">Patchwarden safety report</p>
+  <h1>php84-unpatched.demo.patchwarden.test</h1>
+  <p class="muted">Checked November 3, 2026 at 15:14 UTC</p>
+
+  <div class="grid">
+    <section class="block">
+      <h2>Your version</h2>
+      
+        <p class="big">PHP 8.4.13</p>
+      
+    </section>
+
+    <section class="block">
+      <h2>Your risk</h2>
+      <p><span class="badge risk-patch_now">Patch now</span></p>
+      <p>PHP 8.4.13 has the flaw that lets attackers take over a site without logging in.</p>
+      
+    </section>
+
+    <section class="block">
+      <h2>What to do next</h2>
+      <p>Update PHP to 8.4.27 or newer as soon as possible. Our Patch agent can do it with your approval.</p>
+      <p class="muted">First safe release for your PHP line: 8.4.27.</p>
+    </section>
+
+    
+    
+  </div>
+
+  <details>
+    <summary>Technical details</summary>
+    <p>Checked for CVE-2026-109618, CVE-2026-109619. Scanned URL: https://php84-unpatched.demo.patchwarden.test; version read from the x-powered-by header.</p>
+    
+    
+    <table><tr><td>content-length</td><td>114</td></tr><tr><td>content-type</td><td>text/html; charset=utf-8</td></tr><tr><td>server</td><td>nginx</td></tr><tr><td>x-powered-by</td><td>PHP/8.4.13</td></tr></table>
+    
+  </details>
+
+  <footer>
+    About this check: we only looked at what your site shows to every visitor. We did not log in, and we
+    did not change anything. A hidden version is not proof of safety; the Patchwarden plugin or server agent can check from the inside.
+  </footer>
+</div>
+</main></body>
+</html>

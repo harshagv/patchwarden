@@ -10,7 +10,7 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+/dist/
 downloads/
 eggs/
 .eggs/
@@ -167,7 +167,7 @@ venv.bak/
 .ropeproject
 
 # mkdocs/Zensical documentation
-/site
+# (not used here: site/ is the Patchwarden website and must be committed)
 
 # mypy
 .mypy_cache/
@@ -218,3 +218,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Patchwarden ---
+# Secrets: never commit (.env.example is the template)
+.env
+.env.*
+!.env.example
+# Local state and build output (root only: patchwarden/data/ holds the app's feed files and must be committed)
+/data/
+/dist/
+*.db
+*.sqlite3

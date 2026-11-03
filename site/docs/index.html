@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Patchwarden technical guide</title>
+<meta name="description" content="Every Patchwarden flow, endpoint, safety rule and setting.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="docs-page">
+<header class="nav">
+  <a class="brand" href="../"><img src="../assets/favicon.svg" alt="" width="26" height="26"> Patchwarden</a>
+  <nav class="nav__links">
+    <a href="../#how">How it works</a>
+    <a href="../#agents">Agents</a>
+    <a href="../#screens">Screens</a>
+    <a href="../#run">Run it</a>
+    <a href="../docs/" aria-current="page">Docs</a>
+    <a href="https://github.com/harshagv/patchwarden" rel="noopener">GitHub</a>
+  </nav>
+  <a class="button button--small" href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access</a>
+</header>
+<main class="docs">
+<aside class="docs__toc"><p class="eyebrow">On this page</p><div class="toc">
+<ul>
+<li><a href="#run-it">Run it</a></li>
+<li><a href="#scan-a-site-phase-1">Scan a site (Phase 1)</a></li>
+<li><a href="#credentials-and-logs">Credentials and logs</a></li>
+<li><a href="#secrets">Secrets</a></li>
+<li><a href="#add-a-site-then-patch-it-phase-2">Add a site, then patch it (Phase 2)</a></li>
+<li><a href="#keep-watching-phase-3-watchdog">Keep watching (Phase 3: Watchdog)</a></li>
+<li><a href="#move-sites-that-cannot-patch-phase-4-migration">Move sites that cannot patch (Phase 4: Migration)</a></li>
+<li><a href="#wordpress-guard-phase-5">WordPress Guard (Phase 5)</a></li>
+<li><a href="#demo-walkthrough-definition-of-done">Demo walkthrough (definition of done)</a></li>
+<li><a href="#where-this-differs-from-the-spec">Where this differs from the spec</a></li>
+<li><a href="#future-ideas">Future ideas</a></li>
+</ul>
+</div>
+</aside><article class="docs__body"><h1 id="patchwarden-technical-guide">Patchwarden: technical guide</h1>
+<p>The full technical reference: every flow, endpoint, safety rule and spec difference. For the product overview and the quick start, see the <a href="../">overview</a>.</p>
+<p>Five agents that protect PHP websites after <strong>PHP2Shell</strong> (CVE-2026-109618 / CVE-2026-109619, CVSS 9.2,
+unauthenticated remote code execution; fixed in PHP 8.5.12 / 8.4.27 / 8.3.36 / 8.2.35).</p>
+<p>The build sheet is <a href="https://github.com/harshagv/patchwarden/blob/main/SPEC.md">SPEC.md</a>. It is the source of truth. The phases are built in order, and each one must pass its
+acceptance tests before the next one starts.</p>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Agent</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Scanner (free, external check)</td>
+<td><strong>Built: all 6 acceptance tests pass</strong></td>
+</tr>
+<tr>
+<td>2</td>
+<td>Patch (backup, patch, test, rollback, owner approval)</td>
+<td><strong>Built: all 4 acceptance tests pass</strong> (against fake panels; real cPanel/Plesk adapters not connected yet)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Watchdog (scheduled version + CVE checks, alerts)</td>
+<td><strong>Built: all 3 acceptance tests pass</strong> (NVD and php.net mocked in tests; not run against the live APIs)</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Migration (breakage scan, staging, sign-off)</td>
+<td><strong>Built: all 3 acceptance tests pass</strong> (staging and promotion against fake hosts; real panels not connected yet)</td>
+</tr>
+<tr>
+<td>5</td>
+<td>WordPress Guard (plugin + bundled flow)</td>
+<td><strong>Built: both acceptance tests pass</strong> (the real plugin code runs in tests against a WordPress stand-in, not full WordPress)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="run-it">Run it</h2>
+<p>Get the code:</p>
+<pre><code class="language-bash">git clone https://github.com/harshagv/patchwarden.git &amp;&amp; cd patchwarden
+</code></pre>
+<p>You need Python 3.12 (<code>brew install python@3.12</code>). The WordPress plugin tests need PHP (<code>brew install php</code>):
+without it, they are skipped and <code>make test</code> says so. <code>make up</code> also needs Docker.</p>
+<pre><code class="language-bash">make dev     # http://localhost:8000/docs and /dashboard; SQLite + demo sites and fake panels, no secrets needed
+make test    # full test suite, offline
+make env     # create .env with generated JWT_SECRET, CREDENTIAL_KEY, POSTGRES_PASSWORD
+make up      # docker compose: app (production mode) + PostgreSQL 16
+make plugin  # dist/patchwarden.zip: the WordPress plugin, pointed at PUBLIC_BASE_URL
+</code></pre>
+<p>In development, any secret left empty is replaced with a throwaway value, so <code>make dev</code> works with nothing
+beyond the <code>.env.example</code> values. In production (<code>APP_ENV=production</code>), the app refuses to start and names
+the missing secret:</p>
+<pre><code>$ APP_ENV=production JWT_SECRET= python -m patchwarden --check-config
+Patchwarden: Refusing to start in production: missing required secret JWT_SECRET. Set it in .env (see .env.example for where to get it).
+</code></pre>
+<h2 id="scan-a-site-phase-1">Scan a site (Phase 1)</h2>
+<p>A scan needs no account: the Scanner is the free lead magnet. If you are logged in, the scan is filed under
+your sites.</p>
+<pre><code class="language-bash"># one domain
+curl -s localhost:8000/api/scans -H 'content-type: application/json' \
+  -d '{&quot;domain&quot;: &quot;php84-unpatched.demo.patchwarden.test&quot;}'
+
+# a CSV, one domain per row (an optional header row &quot;domain&quot; is skipped)
+curl -s localhost:8000/api/scans -F file=@sites.csv
+</code></pre>
+<p>Each scan in the response has a <code>risk</code>, a plain-language <code>summary</code> and <code>next_step</code>, and a <code>share_url</code>. The
+<code>share_url</code> is a signed link to the one-page HTML report. It expires after 7 days (<code>SHARE_LINK_HOURS</code>) and
+needs no login.</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/auth/register</code>, <code>POST /api/auth/login</code></td>
+<td>Account + JWT (bcrypt-hashed password)</td>
+</tr>
+<tr>
+<td><code>POST /api/sites</code>, <code>GET /api/sites</code>, <code>GET /api/sites/{id}</code></td>
+<td>Add a site / list your sites / one site with its scan history</td>
+</tr>
+<tr>
+<td><code>POST /api/scans</code></td>
+<td>Scan one domain (JSON), a list (JSON <code>domains</code>), or a CSV upload (<code>file</code>)</td>
+</tr>
+<tr>
+<td><code>GET /api/scans/{id}</code></td>
+<td>The report as JSON (owner login, or <code>?token=</code> from a share link)</td>
+</tr>
+<tr>
+<td><code>GET /api/scans/{id}/share</code></td>
+<td>A new signed, expiring report link (owner login)</td>
+</tr>
+<tr>
+<td><code>GET /scans/{id}</code></td>
+<td>The one-page HTML report: Your version / Your risk / What to do next</td>
+</tr>
+</tbody>
+</table>
+<p>Every error uses the shape <code>{"error": "&lt;code&gt;", "message": "&lt;plain language&gt;"}</code>. Clients never get a stack trace.</p>
+<h3 id="how-the-risk-is-scored">How the risk is scored</h3>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>safe</code></td>
+<td>A supported branch at or above its fixed release (8.5.12 / 8.4.27 / 8.3.36)</td>
+</tr>
+<tr>
+<td><code>patch_now</code></td>
+<td>A supported branch below its fixed release</td>
+</tr>
+<tr>
+<td><code>must_migrate</code></td>
+<td>8.1 or older (no official patch), or 8.2 within 90 days of its Dec 31, 2026 end of security support (patched or not)</td>
+</tr>
+<tr>
+<td><code>unknown</code></td>
+<td>The version is hidden, only the branch is shown (e.g. <code>PHP/8.4</code>), the version is not in our table, or the site could not be reached. We never guess.</td>
+</tr>
+</tbody>
+</table>
+<p>The version is read from <code>X-Powered-By</code>, then <code>Server</code>, then <code>X-PHP-Version</code>. If a distribution build string
+is found (for example <code>8.1.2-1ubuntu2.14</code>), the report adds a note that the host may have backported the fix.</p>
+<p><strong>WordPress.</strong> When the homepage looks like WordPress, the scanner lists the plugin and theme slugs that the
+page exposes, looks each one up on the WordPress.org API, and matches it against a WPScan-style feed
+(<code>WP_VULN_FEED_PATH</code>). The bundled feed in <code>patchwarden/data/wp_vuln_feed.json</code> is <strong>demo data with made-up
+IDs</strong>. The real WPScan API needs a paid token and is not used. If a plugin's version can't be seen, it is
+flagged as "check needed", never as "affected". These findings appear in their own section of the report and
+do not change the PHP risk score.</p>
+<h3 id="demo-sites">Demo sites</h3>
+<p>In development and test, hosts under <code>*.demo.patchwarden.test</code> are served in-process. The <code>.test</code> domain never
+resolves on the public internet. Production refuses to start with <code>DEMO_SITES</code> on.</p>
+<p><code>php84-unpatched</code>, <code>php84-fixed</code>, <code>php85-fixed</code>, <code>php83-unpatched</code>, <code>php82-fixed</code>, <code>php81</code>, <code>php74</code>, <code>hidden</code>,
+<code>branch-only</code>, <code>static</code>, <code>wordpress</code>, <code>bulk-01</code> … <code>bulk-10</code>, <code>redirect</code>, <code>redirect-internal</code> (redirects to
+the cloud metadata address and must be refused), <code>redirect-loop</code>.</p>
+<h3 id="ssrf-protection">SSRF protection</h3>
+<p>The scanner fetches addresses that users supply, from our server. Every hop (the first request and each redirect) is checked:</p>
+<ul>
+<li>http/https only; no <code>user:pass@</code> in the URL; ports 80/443 only (<code>SCAN_ALLOWED_PORTS</code>).</li>
+<li>The host must resolve <strong>only</strong> to public addresses. Private, loopback, link-local (including
+  169.254.169.254), CGNAT, multicast, reserved, documentation and IPv4-mapped/6to4 forms of those are refused,
+  and so are <code>localhost</code>, <code>*.local</code>, <code>*.internal</code> and <code>*.home.arpa</code>. A mixed DNS answer (public + private) is refused.</li>
+<li>The connection goes to the IP address we checked (Host header and TLS SNI keep the name), so DNS rebinding between check and connect does not work.</li>
+<li>At most 3 redirects, a 10 s overall time limit, and a 1 MB body cap. Proxy environment variables are ignored.</li>
+<li>A direct internal target is rejected with <code>400</code> and nothing is stored. If a public site redirects inward, the scan is stored as <code>unknown</code> with the reason.</li>
+</ul>
+<h2 id="credentials-and-logs">Credentials and logs</h2>
+<ul>
+<li>No credential appears in any response, log or error. <code>tests/test_canary_and_errors.py</code> sends random canary
+  passwords through registration, login, validation errors, bad JSON and an unexpected crash. It then checks
+  every response body and header, every log record and the audit log for the canaries, <code>JWT_SECRET</code> and
+  <code>CREDENTIAL_KEY</code>.</li>
+<li>Unexpected crashes are logged by exception type and route only. The exception text could hold input.</li>
+<li>Log handlers also redact <code>?token=</code> query values, bearer tokens and the configured secrets. This is defence in depth.</li>
+<li>Stored response headers keep cookie names only, never the values.</li>
+<li>A share-link token can't be used as a login token, and a login token can't be used as a share link.</li>
+<li>Hosting tokens are Fernet-encrypted at rest and decrypted only inside the adapter call. They never appear
+  in an API response, the dashboard, a patch report, an audit entry, a backup or a log line.
+  <code>tests/test_phase2_acceptance.py::test_no_credential_in_logs_reports_or_responses</code> proves this with a canary
+  token through the whole flow: dry run, approve, success, rollback, a rejected token, and invalid input.</li>
+<li><code>NVD_API_KEY</code> and <code>SMTP_PASSWORD</code> are redacted from logs. They never appear in alerts, emails, pages or
+  responses, and <code>tests/test_watchdog.py::test_watchdog_secrets_never_leak</code> checks this with canaries. SMTP
+  failures are logged by exception type only, because the server's reply can quote the login.</li>
+<li>The dashboard uses an HttpOnly, SameSite=Strict session cookie. Every form carries a CSRF token, and
+  forms posted from another origin are refused.</li>
+</ul>
+<h2 id="secrets">Secrets</h2>
+<p>Rules: no secret is ever written in code, docs, tests or git history. Secrets go in <code>.env</code> (git-ignored). The
+<code>.env.example</code> file ships with empty values. No LLM/AI key is used: these agents are deterministic checkers.</p>
+<p><strong>Required to run anything</strong></p>
+<table>
+<thead>
+<tr>
+<th>Secret</th>
+<th>Where to get it</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DATABASE_URL</code></td>
+<td>Your PostgreSQL provider (local dev: leave empty for SQLite)</td>
+<td>All phases</td>
+</tr>
+<tr>
+<td><code>JWT_SECRET</code></td>
+<td>Generate: <code>openssl rand -hex 32</code></td>
+<td>Auth, all phases</td>
+</tr>
+<tr>
+<td><code>CREDENTIAL_KEY</code></td>
+<td>Generate: <code>python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</code></td>
+<td>Fernet encryption of stored credentials, Phases 2-5</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Per customer site (the owner supplies these, never you)</strong></p>
+<table>
+<thead>
+<tr>
+<th>Secret</th>
+<th>Where the owner gets it</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hosting panel API token (cPanel/WHM or Plesk)</td>
+<td>Hosting panel, API Tokens section; permission to change PHP version and restart workers only</td>
+<td>Patch agent</td>
+</tr>
+<tr>
+<td>WordPress Application Password</td>
+<td>WP admin &gt; Users &gt; Profile &gt; Application Passwords, for a dedicated lowest-role user that can install/upgrade</td>
+<td>WP Guard, Patch agent on WP sites</td>
+</tr>
+<tr>
+<td>SSH deploy key (VPS/custom servers only)</td>
+<td>Owner generates a keypair and adds the public key, restricted to the site's user</td>
+<td>Patch/Migration on non-panel servers</td>
+</tr>
+<tr>
+<td>Plugin API key</td>
+<td>Auto-generated by the dashboard when a site is added</td>
+<td>Plugin/agent communication</td>
+</tr>
+</tbody>
+</table>
+<p>Never ask an owner for their hosting account password, WordPress admin password or root password.</p>
+<p><strong>Optional, only when that feature is switched on</strong></p>
+<table>
+<thead>
+<tr>
+<th>Secret</th>
+<th>When needed</th>
+<th>Where to get it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NVD_API_KEY</code></td>
+<td>Higher CVE feed rate limit</td>
+<td>NVD API key request page (free)</td>
+</tr>
+<tr>
+<td><code>SMTP_HOST</code>, <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code> (or <code>RESEND_API_KEY</code>)</td>
+<td>Email alerts + monthly reports</td>
+<td>Any SMTP provider or Resend</td>
+</tr>
+<tr>
+<td><code>S3_BACKUP_ENDPOINT</code>, <code>S3_BACKUP_KEY</code>, <code>S3_BACKUP_SECRET</code>, <code>S3_BACKUP_BUCKET</code></td>
+<td>Off-site backups (default: local disk)</td>
+<td>Any S3-compatible storage</td>
+</tr>
+<tr>
+<td><code>STRIPE_SECRET_KEY</code>, <code>STRIPE_PUBLISHABLE_KEY</code>, <code>STRIPE_WEBHOOK_SECRET</code></td>
+<td>Phase 6 only, not this build</td>
+<td>Stripe dashboard</td>
+</tr>
+<tr>
+<td><code>SENTRY_DSN</code></td>
+<td>Production error tracking</td>
+<td>Sentry project settings</td>
+</tr>
+</tbody>
+</table>
+<p>Settings that are not secrets: <code>APP_ENV</code>, <code>PUBLIC_BASE_URL</code>, <code>DEMO_SITES</code>, <code>POSTGRES_PASSWORD</code> (compose only), <code>SCAN_*</code>, <code>SHARE_LINK_HOURS</code>, <code>ACCESS_TOKEN_MINUTES</code>, <code>WPORG_API_ENABLED</code>, <code>WP_VULN_FEED_PATH</code>, <code>BACKUP_DIR</code>,
+<code>WATCHDOG_SCHEDULER</code>, <code>CVE_FEED</code>, <code>CVE_FIXTURE_PATH</code>, <code>CVE_LOOKBACK_DAYS</code>, <code>SMTP_PORT</code>, <code>ALERT_FROM_EMAIL</code>.</p>
+<h2 id="add-a-site-then-patch-it-phase-2">Add a site, then patch it (Phase 2)</h2>
+<ol>
+<li><strong>Create an account</strong> (<code>POST /api/auth/register</code>), then log in to the dashboard at <code>/dashboard/login</code>.</li>
+<li><strong>Add the site</strong> on the dashboard, or with <code>POST /api/sites</code>
+   (<code>{"domain", "platform", "login_path", "form_path"}</code>). The login and form paths are the pages that get
+   checked before and after a change. WordPress sites check <code>/wp-login.php</code> by default.</li>
+<li><strong>Give access with a token, never a password.</strong> Paste a cPanel or Plesk API token, or the agent API key
+   (<code>POST /api/sites/{id}/credentials</code>, <code>{"kind": "cpanel_token" | "plesk_token" | "api_key", "value"}</code>).
+   The token is Fernet-encrypted with <code>CREDENTIAL_KEY</code> and never shown again. <code>DELETE
+   /api/sites/{id}/credentials/{cid}</code> revokes it at any time. SSH keys and WordPress application passwords
+   arrive with Phases 4 and 5.</li>
+</ol>
+<h3 id="the-approval-and-rollback-flow">The approval and rollback flow</h3>
+<pre><code>Plan (dry run) ──owner clicks Approve──▶ backup + verify ──▶ before-checks ──▶ switch PHP ──▶ restart ──▶ after-checks
+      │ nothing changes                    │ fails: STOP        │ fail: STOP                                   │ fail:
+      ▼                                     ▼ nothing changed    ▼ nothing changed                              ▼
+ state: dry_run                         state: failed        state: failed               restore backup + old PHP → rolled_back
+                                                                                         all pass → succeeded ──(one click)──▶ rolled_back
+</code></pre>
+<ul>
+<li><strong>Dry run by default.</strong> <code>POST /api/patches {"site_id"}</code> (or "Plan a PHP update" on the dashboard) only
+  reads the current version and the versions the host offers. It writes the plan and changes nothing. The
+  target is the newest release on the same PHP line that has the fix. Moving to another line (for example
+  8.1 → 8.3) is a migration, which is the Migration agent's job (Phase 4).</li>
+<li><strong>No change without an approval record.</strong> <code>POST /api/patches/{id}/approve</code> (or "Approve and run") is
+  allowed only for the site owner. It records <code>approved_by</code> and <code>approved_at</code>, and moves the job to <code>running</code>
+  in one atomic step, so a double click can't start it twice. The run happens in the background, and the
+  report page refreshes itself.</li>
+<li><strong>The order is fixed.</strong> Backup (files + database; the checksum is verified and a restore dry-run is
+  recorded) → before-state (version, homepage, login page, form page) → switch PHP → restart workers →
+  after-state. A failed backup, or a site that is already broken before the change, stops the run with
+  nothing changed. A failed after-check, or any error after the switch, restores the backup and puts the
+  old version back automatically. The report says so.</li>
+<li><strong>Rollback is one click</strong> from the report page (<code>POST /api/patches/{id}/rollback</code>), for a job that succeeded.</li>
+<li><strong>Everything is audited.</strong> Each action is written to <code>audit_log</code> with who, what, when and the backup id:
+  <code>patch.dry_run</code>, <code>patch.approved</code>, <code>backup.created</code>, <code>php.version_changed</code>, <code>php.restarted</code>,
+  <code>backup.restored</code>, <code>patch.succeeded</code> / <code>failed</code> / <code>rolled_back</code>.</li>
+<li><strong>The report</strong> at <code>/dashboard/patches/{id}</code> shows the old and new versions, every check before and after,
+  the backup location and checksum, who approved and when, and the step log. Use the browser's Print to save a copy.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/patches</code></td>
+<td>Create a patch job in dry-run state</td>
+</tr>
+<tr>
+<td><code>GET /api/patches/{id}</code></td>
+<td>The job and its before/after report</td>
+</tr>
+<tr>
+<td><code>POST /api/patches/{id}/approve</code></td>
+<td>Owner approval; starts the run (202)</td>
+</tr>
+<tr>
+<td><code>POST /api/patches/{id}/rollback</code></td>
+<td>One-click rollback of a succeeded job (202)</td>
+</tr>
+<tr>
+<td><code>PATCH /api/sites/{id}</code></td>
+<td>Set the login/form pages to check</td>
+</tr>
+<tr>
+<td><code>POST /api/sites/{id}/credentials</code>, <code>DELETE /api/sites/{id}/credentials/{cid}</code></td>
+<td>Add / revoke access</td>
+</tr>
+<tr>
+<td><code>/dashboard/login</code>, <code>/dashboard/sites</code>, <code>/dashboard/patches/{id}</code></td>
+<td>Dashboard: add sites and tokens, scan, plan, approve, roll back</td>
+</tr>
+</tbody>
+</table>
+<h3 id="hosting-adapters">Hosting adapters</h3>
+<p>Every access method implements one interface (<code>patchwarden/patch/adapters.py</code>, <code>HostingAdapter</code>):
+<code>php_version</code>, <code>available_versions</code>, <code>create_backup</code>, <code>verify_restore</code>, <code>set_php_version</code>, <code>restart_php</code> and
+<code>restore_backup</code>.</p>
+<ul>
+<li><strong>Real adapters</strong> (<code>CpanelAdapter</code>, <code>PleskAdapter</code>, <code>AgentAdapter</code>) are stubs in this build. They refuse with
+  <code>adapter_not_connected</code> and change nothing, rather than pretend. They still need to be built and tested
+  against a real panel or staging account.</li>
+<li><strong>The fake adapter</strong> (<code>patchwarden/fakes.py</code>) runs the same interface against in-process fake hosts. Tests and
+  <code>make dev</code> use it for these demo sites only:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Demo host</th>
+<th>Starts on</th>
+<th>What happens when you patch it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shop84.demo.patchwarden.test</code></td>
+<td>8.4.13</td>
+<td>Patches to 8.4.27; all checks pass</td>
+</tr>
+<tr>
+<td><code>fragile84.demo.patchwarden.test</code></td>
+<td>8.4.13</td>
+<td><code>/checkout</code> breaks on 8.4.27, so the patch rolls back automatically</td>
+</tr>
+<tr>
+<td><code>shop83.demo.patchwarden.test</code></td>
+<td>8.3.20</td>
+<td>Patches to 8.3.36</td>
+</tr>
+</tbody>
+</table>
+<p>Any token value works on the demo hosts. Add each one with <code>login_path</code> <code>/login</code> and <code>form_path</code> <code>/checkout</code>.</p>
+<p>Backups go to local disk (<code>BACKUP_DIR</code>, default <code>data/backups</code>). S3 is optional and not built yet.</p>
+<h2 id="keep-watching-phase-3-watchdog">Keep watching (Phase 3: Watchdog)</h2>
+<p>Turn monitoring on for a site (dashboard button, or <code>POST /api/sites/{id}/monitoring {"enabled": true}</code>). This
+creates an active <code>watchdog</code> subscription. From then on the Watchdog, which runs inside the app on
+APScheduler (no Redis, no Celery):</p>
+<ul>
+<li><strong>Daily: re-checks the site's PHP version.</strong> Each check is an external scan. If the version is hidden and
+  the owner gave access, a read-only inside check asks the host. If the risk got worse (for example, someone
+  downgraded PHP to an unpatched release), it raises an alert.</li>
+<li><strong>Hourly: polls the CVE feeds</strong> and matches every advisory against each site's current version:</li>
+<li>the NVD CVE API 2.0, filtered to the PHP product (<code>cpe:2.3:a:php:php</code>), with the affected version ranges.
+    <code>NVD_API_KEY</code> is optional: it raises the rate limit and is sent in a header, never in the URL.</li>
+<li>php.net's release feed, for each supported line. A new release tagged <em>security</em> alerts sites on older
+    releases of that line.</li>
+<li><strong>Raises one alert per site per advisory, ever.</strong> Each alert is in plain language: <em>What changed / What it
+  means / What to do</em>, with a link to the site on the dashboard where the Phase 2 patch flow starts. It shows
+  under <code>/dashboard/alerts</code> and <code>GET /api/alerts</code>, and is emailed to the owner when SMTP is set up. The
+  <code>sent_at</code> field stays empty, and the page says "Not emailed", when no email went out.</li>
+<li><strong>Monthly: a safety report per site.</strong> It covers the checks run, the risks found, the actions taken (patch
+  jobs) and the current version. See <code>/dashboard/sites/{id}/monthly?month=2026-10</code> and <code>GET
+  /api/sites/{id}/monthly-report?month=2026-10</code>. It is emailed on the 1st.</li>
+<li><strong>Off means off.</strong> Turning monitoring off cancels the subscription, and the site gets no more checks of any kind.</li>
+</ul>
+<p>The scheduler runs an hourly tick (version checks for sites that are due, then a feed poll) and a monthly
+job on the 1st at 06:00 UTC. "Run Watchdog checks now" on the dashboard (<code>POST /api/watchdog/run</code>) runs a
+check of your own sites straight away. Run one app process: each process starts its own scheduler. Alerts
+are deduplicated, so a second process only wastes requests.</p>
+<p><strong>In development</strong>, <code>CVE_FEED=fixture</code> (the default when demo sites are on) reads
+<code>patchwarden/data/cve_feed.demo.json</code> instead of NVD. To try an alert, add an entry in NVD format and press
+"Run Watchdog checks now". The shipped entry, <code>PHPG-DEMO-2026-0101</code>, is made up and affects PHP 8.3 before
+8.3.40, so <code>php83-unpatched.demo.patchwarden.test</code> and <code>shop83.demo.patchwarden.test</code> get an alert.</p>
+<p><strong>Billing hook, no payments.</strong> <code>subscriptions.status</code> is <code>active</code>, <code>past_due</code> or <code>cancelled</code>. Monitoring keeps
+running while a subscription is <code>past_due</code>, as a grace period. Allowed changes: active → past_due /
+cancelled; past_due → active / cancelled; cancelled → active. Any other change is refused with <code>409
+invalid_transition</code>. <code>POST /api/subscriptions/{id}/status</code> (admin only) is where a Phase 6 Stripe webhook
+would connect. Each change is audited.</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/sites/{id}/monitoring</code></td>
+<td>Turn the Watchdog on/off for a site</td>
+</tr>
+<tr>
+<td><code>GET /api/alerts</code> (<code>?unread=true</code>), <code>POST /api/alerts/{id}/read</code></td>
+<td>Your alerts</td>
+</tr>
+<tr>
+<td><code>GET /api/sites/{id}/monthly-report?month=YYYY-MM</code></td>
+<td>Monthly safety report (JSON)</td>
+</tr>
+<tr>
+<td><code>POST /api/watchdog/run</code></td>
+<td>Check your sites now</td>
+</tr>
+<tr>
+<td><code>POST /api/subscriptions/{id}/status</code></td>
+<td>Billing status change (admin)</td>
+</tr>
+<tr>
+<td><code>/dashboard/alerts</code>, <code>/dashboard/sites/{id}/monthly</code></td>
+<td>Dashboard pages</td>
+</tr>
+</tbody>
+</table>
+<h2 id="move-sites-that-cannot-patch-phase-4-migration">Move sites that cannot patch (Phase 4: Migration)</h2>
+<p>This is for PHP 8.2 and older. 8.1 and older have no official patch, and 8.2 loses security fixes on Dec 31,
+2026. Sites on 8.3 and newer are sent to the Patch agent instead. Production is never migrated directly.</p>
+<ol>
+<li><strong>Plan</strong> (<code>POST /api/migrations {"site_id"}</code>, or "Plan a migration" on the dashboard). This step is
+   read-only. It reads the site's code through the host access and scans it for breaking changes between the
+   current version and the target. The default target is the newest fixed 8.4 release the host offers (8.4 is
+   supported to the end of 2028), then 8.3, then 8.5. The result has two parts:
+   - <strong>A breakage report</strong> with file and line references and the code line. String literals are blanked out,
+     so a password in a <code>define()</code> never reaches a report. WordPress core is skipped (update WordPress itself),
+     and so are functions the site already polyfills.
+   - <strong>A migration plan</strong>: an ordered fix list (breaking changes first, then deprecations), each fix marked as
+     automatic or for a developer; an effort bucket (small / medium / large); and the target version.</li>
+</ol>
+<p>No access token? Upload a zip of the code instead (multipart <code>file</code> + <code>site_id</code> + <code>from_version</code>). The zip
+   is read in memory with size limits and is never extracted or run. You get the breakage report and the
+   plan; staging needs host access.
+2. <strong>Staging</strong> (<code>POST /api/migrations/{id}/staging</code>). This copies the site (files, database, PHP version) to a
+   staging site. The first run checks that the copy works, then applies the automatic fixes on staging,
+   switches staging to the target PHP and restarts it. It runs the Phase 2 checks on staging and re-scans the
+   staging code. Staging passes only if every check passes <strong>and</strong> no breaking code is left. A developer
+   makes the manual fixes on the staging site, then you run the staging tests again. The staging copy is
+   re-used, so their changes are kept. A new staging run clears any earlier sign-off.
+3. <strong>Sign-off</strong> (<code>POST /api/migrations/{id}/signoff</code>, or the dashboard with a "I checked the staging site"
+   box). The site owner signs off after staging has passed. This records <code>signed_off_by</code> and <code>signed_off_at</code>.
+4. <strong>Promote</strong> (<code>POST /api/migrations/{id}/promote</code>). Without a sign-off this is refused with <strong>403
+   <code>signoff_required</code></strong>. With one, a Phase 2 patch job runs, with the sign-off as its approval record:
+   backup → before-checks → <strong>deploy the tested staging code</strong> → switch PHP → restart → after-checks →
+   automatic rollback (backup + old version) if anything fails. Only code files are copied. Production keeps
+   its own database and config files (<code>wp-config.php</code>, <code>.env</code>, and so on). If the staging code changed after
+   it was tested, promotion stops with nothing changed, and you test and sign off again. The production
+   promotion record links to the same before/after report as a patch (<code>/dashboard/patches/{id}</code>).</p>
+<p>The breakage rules (<code>patchwarden/migration/rules.py</code>) cover the PHP 7.0 → 8.4 migration guides. Breaking
+changes include the <code>mysql_*</code> and <code>ereg*</code> functions, <code>create_function</code>, <code>each</code>, <code>get_magic_quotes_*</code>,
+<code>money_format</code>, <code>__autoload</code>, <code>$s{0}</code> offsets, <code>(real)</code> / <code>(unset)</code> casts, <code>$php_errormsg</code>, <code>match</code> as a
+name, and IMAP being unbundled in 8.4. Deprecations to review include <code>strftime</code>, <code>mhash</code>,
+<code>FILTER_SANITIZE_STRING</code>, <code>utf8_encode</code>, <code>"${var}"</code>, <code>get_class()</code> with no arguments, implicitly nullable
+parameters, <code>E_STRICT</code> and <code>E_USER_ERROR</code>. Automatic fixes are limited to exact rewrites:
+<code>get_magic_quotes_gpc()</code> → <code>false</code>, <code>$s{0}</code> → <code>$s[0]</code>, <code>(real)</code> → <code>(float)</code>, <code>(unset) $x</code> → <code>null</code>,
+<code>Type $x = null</code> → <code>?Type $x = null</code>, and <code>"${v}"</code> → <code>"{$v}"</code>. Config files are never auto-edited. This is a
+static scan: it can't see behaviour that only shows up at runtime (dynamic properties, number-vs-string
+comparisons). That is what the staging checks and your own review of staging are for.</p>
+<table>
+<thead>
+<tr>
+<th>Demo host</th>
+<th>Starts on</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wp74.demo.patchwarden.test</code></td>
+<td>WordPress on 7.4.33</td>
+<td>4 breaking hits (each, create_function, get_magic_quotes_gpc, <code>$title{0}</code>); staging fails until the two manual fixes are made on <code>staging.wp74…</code></td>
+</tr>
+<tr>
+<td><code>legacy81.demo.patchwarden.test</code></td>
+<td>custom PHP 8.1.31</td>
+<td>Only automatic fixes and deprecations: staging passes first time, then sign off and promote</td>
+</tr>
+</tbody>
+</table>
+<p>The demo fake hosts "run" their code: a function removed in the running PHP version makes every page return
+500. That is why <code>wp74</code> really breaks on staging until it is fixed.</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/migrations</code></td>
+<td>Breakage report + migration plan (JSON with <code>site_id</code>, or a zip upload)</td>
+</tr>
+<tr>
+<td><code>GET /api/migrations/{id}</code></td>
+<td>The migration, its reports and its promotion record</td>
+</tr>
+<tr>
+<td><code>POST /api/migrations/{id}/staging</code></td>
+<td>Copy to staging (or re-use it), auto-fix, switch, test (202)</td>
+</tr>
+<tr>
+<td><code>POST /api/migrations/{id}/signoff</code></td>
+<td>Owner/IT sign-off after staging passed</td>
+</tr>
+<tr>
+<td><code>POST /api/migrations/{id}/promote</code></td>
+<td>Promote to production (403 without sign-off; 202)</td>
+</tr>
+<tr>
+<td><code>/dashboard/migrations/{id}</code></td>
+<td>Printable plan, breakage table, staging report and buttons</td>
+</tr>
+</tbody>
+</table>
+<h2 id="wordpress-guard-phase-5">WordPress Guard (Phase 5)</h2>
+<p>This is one product for WordPress owners: the Scanner, Patch and Watchdog behind one name, one price (the
+<code>wp_guard</code> subscription; no payments in this build) and one page per site (<code>/dashboard/wp-guard/{site}</code>).</p>
+<p><strong>Install, for the owner</strong> (the same steps are on the site's dashboard page and in the plugin's <code>readme.txt</code>):
+1. Download the plugin from the site's WordPress Guard page (<code>patchwarden.zip</code>).
+2. In WordPress: Plugins &gt; Add New &gt; Upload Plugin, then Install and Activate.
+3. Press "Get your plugin key" and copy it. It is shown once; Patchwarden keeps only a SHA-256 hash.
+4. In WordPress: Settings &gt; Patchwarden, paste the key, then "Save and connect". Done.</p>
+<p><strong>The plugin</strong> (<code>wordpress-plugin/patchwarden/</code>, written to WordPress coding standards):
+- <strong>Reports</strong> the PHP version, the WordPress version, plugins and themes (with versions, whether each is
+  active, and any update WordPress knows about). It reports when the key is saved and then twice a day by
+  WP-Cron. It sends no users, content or settings.
+- <strong>Runs only actions the owner approved</strong>, which it pulls hourly. Patchwarden never connects into the site.
+  It knows exactly two action kinds: update an installed plugin or theme from WordPress.org with
+  WordPress's own updater, and send a report now. Anything else is answered "not supported". It cannot
+  change PHP; that needs the hosting panel token (Phase 2).
+- <strong>Is safe by construction.</strong> Settings need <code>manage_options</code> and a nonce, and input is sanitized and
+  output escaped. The saved key is never printed back. It uses HTTPS only (plain http is allowed only to
+  localhost, for development), follows no redirects, and keeps the key in a non-autoloaded option.
+- <strong>Removes itself cleanly.</strong> <code>uninstall.php</code> deletes its options and scheduled events, and calls
+  <code>/api/plugin/disconnect</code>, so the key is also switched off on the server. Deactivating only stops the schedule.</p>
+<p><strong>On the server:</strong>
+- <strong>The safety score</strong> starts at 100. It loses 40 for unpatched PHP, 50 for PHP that must migrate and 15 for
+  an unknown version. Each plugin or theme with a known flaw costs 25 / 15 / 8 / 4 points (critical / high /
+  medium / low), a "maybe affected" one costs 3, and an unwatched site costs 10. The fix list is plain
+  language, with no CVE IDs or jargon.
+- <strong>The one "Fix it" button</strong> never changes anything. For unpatched PHP (hosting token needed), it creates a
+  Phase 2 patch job in <code>awaiting_approval</code>, with any plugin/theme updates added to the same plan. For a
+  plugin or theme only, it creates a job that waits for approval and is carried out by the plugin. For
+  8.2-and-older PHP, it creates a Phase 4 migration plan. The owner is then taken to the approval page, and
+  the usual Phase 2 approval (who, when, audit log, backup, checks, rollback) is the only way forward.
+  Plugin updates are queued for the plugin only after that approval, and only after the PHP step succeeded.
+- <strong>Plugin reports count as the Watchdog's daily inside check.</strong> The version is exact even when the site
+  hides it, so new CVEs are matched against it.</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Who</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/sites/{id}/plugin-key</code></td>
+<td>owner</td>
+<td>New plugin key, shown once; the old one stops working</td>
+</tr>
+<tr>
+<td><code>POST /api/sites/{id}/wp-guard</code>, <code>GET /api/sites/{id}/wp-guard</code></td>
+<td>owner</td>
+<td>Turn WordPress Guard on/off; score + fix list</td>
+</tr>
+<tr>
+<td><code>POST /api/sites/{id}/fix</code></td>
+<td>owner</td>
+<td>"Fix it": a plan waiting for approval</td>
+</tr>
+<tr>
+<td><code>GET /api/wp-guard/plugin.zip</code>, <code>/dashboard/wp-guard-plugin.zip</code></td>
+<td>owner</td>
+<td>The plugin, set up for this server</td>
+</tr>
+<tr>
+<td><code>POST /api/plugin/report</code>, <code>GET /api/plugin/actions</code>, <code>POST /api/plugin/actions/{id}/result</code>, <code>POST /api/plugin/disconnect</code></td>
+<td>plugin (<code>X-Patchwarden-Key</code>)</td>
+<td>Report, pull approved actions, report results, switch the key off</td>
+</tr>
+</tbody>
+</table>
+<p><strong>How the plugin is tested.</strong> <code>tests/wp_harness/harness.php</code> is a stand-in for the WordPress functions the
+plugin uses: options, WP-Cron, hooks, transients, nonces, capabilities, upgraders, and HTTP through curl. It
+keeps its "database" in a JSON file. The tests run the real plugin code with PHP against a live Patchwarden
+server on localhost. They install, activate, save the key, report, run approved actions, show the settings
+page and uninstall, and then check what is left behind. WordPress core itself is not loaded. Running the
+plugin in a real WordPress (for example WordPress Playground) is listed under Future ideas.</p>
+<h2 id="demo-walkthrough-definition-of-done">Demo walkthrough (definition of done)</h2>
+<p>With <code>make dev</code>, register (<code>POST /api/auth/register</code>) and log in at <code>/dashboard</code>:
+1. <strong>Scan a PHP 8.1 site.</strong> Add <code>legacy81.demo.patchwarden.test</code> with any token and press "Scan now". It shows
+   <strong>Must migrate</strong>.
+2. <strong>Run the migration plan.</strong> Press "Plan a migration", read the breakage report, then press "Run staging
+   tests" (it passes), tick the box and "Sign off", then "Promote to production".
+3. <strong>Before/after report.</strong> "Before / after report for production" shows PHP 8.1.31 → 8.4.27, every check
+   before and after, the backup, and who signed off.</p>
+<p><code>tests/test_migration_flow.py::test_custom_php81_site_passes_staging_first_time</code> and the Phase 4 acceptance tests cover the same path.</p>
+<h2 id="where-this-differs-from-the-spec">Where this differs from the spec</h2>
+<ul>
+<li><code>.env.example</code> leaves <code>DATABASE_URL</code> empty, so local dev uses SQLite. The spec's PostgreSQL URL is shown as a
+  comment. It also adds <code>APP_ENV</code>, <code>PUBLIC_BASE_URL</code>, <code>DEMO_SITES</code> and <code>POSTGRES_PASSWORD</code>.</li>
+<li>The <code>scans</code> table adds <code>scanned_url</code> and <code>findings</code> (JSON: version source, plain-language summary, WordPress
+  results, fetch errors) to the spec's columns.</li>
+<li>Tables are created per phase (Phase 1: <code>users</code>, <code>sites</code>, <code>scans</code>, <code>audit_log</code>; Phase 2: <code>credentials</code>,
+  <code>backups</code>, <code>patch_jobs</code>). On startup, new nullable columns are also added to an existing dev database.</li>
+<li><code>sites</code> adds <code>check_paths</code> (JSON): the login/form pages the Patch agent checks.</li>
+<li>Phase 3 adds three tables beyond the spec's list. <code>watch_checks</code> is each check run (the monthly report and
+  the "monitoring off" rule are built on it). <code>advisories</code> holds the CVEs and releases being matched.
+  <code>feed_cursors</code> records where each feed poll stopped. <code>alerts.cve_id</code> also holds <code>PHP-8.4.28</code> for a release
+  and <code>risk:&lt;level&gt;:&lt;check&gt;</code> for a risk change. It is unique per site, which is how alerts are deduplicated.</li>
+<li>Watchdog version checks are stored as scans too (<code>findings.source = "watchdog"</code>), so a site's scan history shows them.</li>
+<li><code>migrations</code> adds <code>signed_off_at</code>, <code>source</code> (host or upload), <code>promotion</code> (the production promotion
+  record), <code>patch_job_id</code> (its before/after report) and <code>created_at</code> to the spec's columns.</li>
+<li>The adapter interface gains <code>read_code</code>, <code>create_staging</code>, <code>open_staging</code> and <code>write_files</code> for the
+  Migration agent. The real cPanel/Plesk/agent adapters refuse these too until they are built.</li>
+<li>The plugin key is generated when the owner presses "Get your plugin key", not silently when a site is
+  added. This is so it can be shown exactly once and stored only as a hash. The spec's credential kind
+  <code>api_key</code> (Fernet, Phase 2) stays for keys that Patchwarden sends <em>to</em> an agent.</li>
+<li>Phase 5 adds <code>plugin_keys</code> and <code>plugin_actions</code> tables.</li>
+<li>Sign-off is by the site owner's account ("owner/IT": IT signs off on the owner's account). Separate IT
+  accounts with sign-off rights would need agency/team accounts, which are out of scope (no multi-tenancy in this build).</li>
+<li>Endpoints added beyond the minimum set: <code>PATCH /api/sites/{id}</code>, <code>POST</code>/<code>DELETE /api/sites/{id}/credentials</code>.</li>
+<li><code>patch_jobs.state</code> <code>awaiting_approval</code> is in the model but unused so far. A new job is <code>dry_run</code> and is
+  approved from there. Phase 5's "Fix it" button is expected to create jobs in <code>awaiting_approval</code>.</li>
+<li>The backup restore dry-run is recorded in the patch report and in the <code>backup.created</code> audit entry. The
+  spec's <code>backups</code> table has no column for it.</li>
+<li>The dashboard covers sites, patches, alerts, monthly reports, migrations and one WordPress Guard page per site.</li>
+<li>No dashboard sign-up page: create the account with <code>POST /api/auth/register</code>.</li>
+</ul>
+<h2 id="future-ideas">Future ideas</h2>
+<p>These are not in the spec, so they are not built:</p>
+<ul>
+<li>Backup retention and clean-up rules.</li>
+<li>Running the plugin's tests inside a real WordPress (WordPress Playground via npx, or the official Docker image).</li>
+<li>Publishing the plugin on WordPress.org, and checking it with the WordPress Coding Standards (PHPCS) in CI.</li>
+<li>Deleting the staging site after a promotion, and a staging site's own expiry.</li>
+<li>Uploading a developer's fixed files to staging through Patchwarden (today the developer edits staging directly).</li>
+<li>A PHP tokenizer-based scan (via <code>php -l</code> / a PHP AST in a sandbox) for runtime-only changes.</li>
+<li>A single scheduler across several app processes (a database lock or a dedicated worker).</li>
+<li>Per-owner alert preferences (email digest, quiet hours) and other channels (SMS, Slack).</li>
+<li>
+<p>A "dry run again" button when a dry run goes stale (today you plan a new one).</p>
+</li>
+<li>
+<p>Rate limiting for the free scan endpoint and login (per IP and per account).</p>
+</li>
+<li>Background (scheduled) bulk scans for very large CSVs. Today up to 100 domains are scanned in the request.</li>
+<li>Reading plugin versions from <code>readme.txt</code>, for more exact WordPress matching.</li>
+<li>Alembic migrations instead of <code>create_all</code> at startup.</li>
+<li>A public "free scan" landing page.</li>
+</ul></article>
+</main>
+<footer class="footer footer--slim">
+  <p>Patchwarden · <a href="../">Overview</a> · <a href="../#status">What is ready today</a> ·
+  <a href="https://github.com/harshagv/patchwarden" rel="noopener">Source on GitHub</a> (MIT) ·
+  Patchwarden is not affiliated with The PHP Group. PHP is a trademark of The PHP Group.</p>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

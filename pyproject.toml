@@ -1,0 +1,10 @@
+[project]
+name = "patchwarden"
+version = "0.1.0"
+description = "Five agents that protect PHP sites after PHP2Shell (CVE-2026-109618 / CVE-2026-109619)."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]

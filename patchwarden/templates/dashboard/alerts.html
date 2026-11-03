@@ -1,0 +1,26 @@
+{% extends "dashboard/layout.html" %}
+{% block title %}Alerts - Patchwarden{% endblock %}
+{% block page %}
+<div class="card">
+  <h1>Alerts</h1>
+  <p class="muted">The Watchdog checks your monitored sites every day, and new PHP security flaws every hour.</p>
+  {% for a in alerts %}
+  <section class="block">
+    <h2>{{ a.site.domain }} <span class="badge risk-{{ 'must_migrate' if a.severity in ('critical', 'high') else 'patch_now' }}">{{ a.severity }}</span>
+      {% if not a.read %}<span class="muted">new</span>{% endif %}</h2>
+    {% for line in a.message.split("\n") %}
+      {% set label, _, text = line.partition(": ") %}
+      {% if label == "Open your site" %}<p><a href="/dashboard/sites#site-{{ a.site_id }}">Open {{ a.site.domain }} and plan the update</a></p>
+      {% else %}<p><strong>{{ label }}:</strong> {{ text }}</p>{% endif %}
+    {% endfor %}
+    <p class="muted">{{ a.created_at.strftime("%b %-d, %Y %H:%M UTC") }} · {{ "Emailed" if a.sent_at else "Not emailed (email is not set up)" }}</p>
+    {% if not a.read %}
+    <form method="post" action="/dashboard/alerts/{{ a.id }}/read" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary" type="submit">Mark as read</button>
+    </form>{% endif %}
+  </section>
+  {% else %}
+  <p>No alerts. Nothing new has put your sites at risk.</p>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,63 @@
+{% extends "dashboard/layout.html" %}
+{% block title %}WordPress Guard: {{ site.domain }}{% endblock %}
+{% block page %}
+<div class="card">
+  <p class="muted">WordPress Guard</p>
+  <h1>{{ site.domain }}</h1>
+
+  <div class="grid">
+    <section class="block">
+      <h2>Your safety score</h2>
+      <p class="big"><span class="badge risk-{{ 'safe' if s.score >= 85 else ('patch_now' if s.score >= 60 else 'must_migrate') }}">{{ s.score }} / 100 · {{ s.grade }}</span></p>
+      <p class="muted">{% if s.checked_at %}Last checked {{ s.checked_at[:16].replace("T", " ") }} UTC{% if s.evidence %}, from the {{ s.evidence }}{% endif %}.{% else %}Not checked yet.{% endif %}
+         {% if s.php_version %}Your site runs PHP {{ s.php_version }}.{% endif %}</p>
+    </section>
+
+    <section class="block">
+      <h2>What to fix</h2>
+      {% if s.fixes %}<ul>{% for i in s.fixes %}<li><strong>{{ i.what }}</strong><br>{{ i.fix }}</li>{% endfor %}</ul>
+      {% else %}<p class="ok">Nothing to fix. We keep watching.</p>{% endif %}
+      {% if s.fixable %}
+      <form method="post" action="/dashboard/wp-guard/{{ site.id }}/fix" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit">Fix it</button>
+      </form>
+      <p class="muted">Fix it shows you exactly what will change. Nothing happens until you approve it.</p>
+      {% endif %}
+    </section>
+
+    <section class="block">
+      <h2>Daily guard</h2>
+      <p>{% if enabled %}<span class="ok">On.</span> We check your site every day and tell you the day a new risk appears.
+         <a href="/dashboard/sites/{{ site.id }}/monthly">Monthly report</a>{% else %}Off.{% endif %}</p>
+      <form method="post" action="/dashboard/wp-guard/{{ site.id }}/enable" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="enabled" value="{{ 'false' if enabled else 'true' }}">
+        <button class="secondary" type="submit">{{ "Turn WordPress Guard off" if enabled else "Turn WordPress Guard on" }}</button>
+      </form>
+    </section>
+
+    <section class="block">
+      <h2>The Patchwarden plugin</h2>
+      {% if s.plugin.connected %}
+        <p class="ok">Connected (key {{ s.plugin.hint }}). Last report {{ s.plugin.last_seen_at[:16].replace("T", " ") }} UTC.</p>
+      {% else %}
+        <ol>
+          <li><a href="/dashboard/wp-guard-plugin.zip">Download the plugin</a>.</li>
+          <li>In WordPress: Plugins &gt; Add New &gt; Upload Plugin, choose patchwarden.zip, Install, Activate.</li>
+          <li>Press "Get your plugin key" below and copy it.</li>
+          <li>In WordPress: Settings &gt; Patchwarden, paste the key, press "Save and connect". Done.</li>
+        </ol>
+      {% endif %}
+      {% if new_key %}
+        <p class="alert">Your plugin key (shown once, copy it now): <code>{{ new_key }}</code></p>
+      {% endif %}
+      <form method="post" action="/dashboard/wp-guard/{{ site.id }}/key" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="secondary" type="submit">{{ "Get a new plugin key (the old one stops working)" if s.plugin.hint else "Get your plugin key" }}</button>
+      </form>
+      <p class="muted">The plugin never asks for a password. Deleting it in WordPress removes its settings and switches its key off.</p>
+    </section>
+  </div>
+</div>
+{% endblock %}

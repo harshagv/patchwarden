@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}PHP safety report: {{ report.domain }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted">Patchwarden safety report</p>
+  <h1>{{ report.domain }}</h1>
+  <p class="muted">Checked {{ scan.created_at.strftime("%B %-d, %Y at %H:%M UTC") }}</p>
+
+  <div class="grid">
+    <section class="block">
+      <h2>Your version</h2>
+      {% if report.detected_version %}
+        <p class="big">PHP {{ report.detected_version }}</p>
+      {% else %}
+        <p class="big">Hidden</p>
+        <p>This site does not show its PHP version to visitors{% if report.findings.php_hint %} ({{ report.findings.php_hint }}){% endif %}. We do not guess.</p>
+      {% endif %}
+    </section>
+
+    <section class="block">
+      <h2>Your risk</h2>
+      <p><span class="badge risk-{{ report.risk }}">{{ risk_labels[report.risk] }}</span></p>
+      <p>{{ report.summary }}</p>
+      {% for note in report.findings.notes or [] %}<p class="muted">{{ note }}</p>{% endfor %}
+    </section>
+
+    <section class="block">
+      <h2>What to do next</h2>
+      <p>{{ report.next_step }}</p>
+      {% if report.fixed_version %}<p class="muted">First safe release for your PHP line: {{ report.fixed_version }}.</p>{% endif %}
+    </section>
+
+    {% set wp = report.findings.wordpress %}
+    {% if wp %}
+    <section class="block">
+      <h2>Your WordPress plugins and themes</h2>
+      {% if not wp.detected %}
+        <p>We could not see WordPress on this page, so we could not list plugins or themes.</p>
+      {% elif not wp.components %}
+        <p>This is a WordPress site, but it does not show which plugins or themes it uses.</p>
+      {% else %}
+        <ul>
+        {% for c in wp.components %}
+          {% set name = (c.wordpress_org.name if c.wordpress_org and c.wordpress_org.name else c.slug) %}
+          {% if not c.vulnerabilities %}
+            <li>{{ name }} ({{ c.type }}): no known problems in our list.</li>
+          {% else %}
+            {% for v in c.vulnerabilities %}
+              {% if v.status == "affected" %}
+              <li><strong>{{ name }}</strong> ({{ c.type }}): has a known security problem ({{ v.severity }}). Update it to {{ v.fixed_in }} or newer.</li>
+              {% else %}
+              <li><strong>{{ name }}</strong> ({{ c.type }}): may have a known security problem ({{ v.severity }}). We could not see its version; make sure it is {{ v.fixed_in or "the latest version" }} or newer.</li>
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
+        </ul>
+      {% endif %}
+    </section>
+    {% endif %}
+  </div>
+
+  <details>
+    <summary>Technical details</summary>
+    <p>Checked for {{ report.cves | join(", ") }}. Scanned URL: {{ report.scanned_url }}{% if report.findings.version_source %}; version read from the {{ report.findings.version_source }} header{% endif %}.</p>
+    {% if report.findings.error %}<p>Fetch problem: {{ report.findings.error.message }}</p>{% endif %}
+    {% if report.raw_headers %}
+    <table>{% for k, v in report.raw_headers.items() %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}</table>
+    {% endif %}
+  </details>
+
+  <footer>
+    About this check: we only looked at what your site shows to every visitor. We did not log in, and we
+    did not change anything. A hidden version is not proof of safety; the Patchwarden plugin or server agent can check from the inside.
+  </footer>
+</div>
+{% endblock %}
