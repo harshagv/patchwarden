@@ -7,24 +7,38 @@
 <meta name="referrer" content="no-referrer">
 <title>Patchwarden technical guide</title>
 <meta name="description" content="Every Patchwarden flow, endpoint, safety rule and setting.">
+<meta name="theme-color" content="#eeebe4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1917" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://patchwarden.harshagv.me/docs/">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body class="docs-page">
+<a class="skip" href="#main">Skip to content</a>
 <header class="nav">
   <a class="brand" href="../"><img src="../assets/favicon.svg" alt="" width="26" height="26"> Patchwarden</a>
   <nav class="nav__links">
     <a href="../#how">How it works</a>
     <a href="../#agents">Agents</a>
+    <a href="../#edge">Edge</a>
     <a href="../#screens">Screens</a>
     <a href="../#run">Run it</a>
     <a href="../docs/" aria-current="page">Docs</a>
     <a href="https://github.com/harshagv/patchwarden" rel="noopener">GitHub</a>
   </nav>
   <a class="button button--small" href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access</a>
+  <details class="nav__menu">
+    <summary aria-label="Menu">Menu</summary>
+    <nav aria-label="Sections (menu)">
+      <a href="../">Overview</a><a href="../#how">How it works</a><a href="../#agents">Agents</a>
+      <a href="../#edge">Edge</a><a href="../#run">Run it</a><a href="../#faq">FAQ</a>
+      <a href="https://github.com/harshagv/patchwarden" rel="noopener">GitHub</a>
+      <a class="nav__menu-cta" href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access</a>
+    </nav>
+  </details>
 </header>
-<main class="docs">
-<aside class="docs__toc"><p class="eyebrow">On this page</p><div class="toc">
+<main class="docs" id="main">
+<details class="docs__toc" open><summary><p class="eyebrow">On this page</p></summary><div class="toc">
 <ul>
 <li><a href="#run-it">Run it</a></li>
 <li><a href="#scan-a-site-phase-1">Scan a site (Phase 1)</a></li>
@@ -45,7 +59,7 @@
 <li><a href="#future-ideas">Future ideas</a></li>
 </ul>
 </div>
-</aside><article class="docs__body"><h1 id="patchwarden-technical-guide">Patchwarden: technical guide</h1>
+</details><article class="docs__body"><h1 id="patchwarden-technical-guide">Patchwarden: technical guide</h1>
 <p>The full technical reference: every flow, endpoint, safety rule and spec difference. For the product overview and the quick start, see the <a href="../">overview</a>.</p>
 <p>Five agents that protect PHP websites after <strong>PHP2Shell</strong> (CVE-2026-109618 / CVE-2026-109619, CVSS 9.2,
 unauthenticated remote code execution; fixed in PHP 8.5.12 / 8.4.27 / 8.3.36 / 8.2.35).</p>
@@ -184,7 +198,7 @@ needs no login.</p>
 is found (for example <code>8.1.2-1ubuntu2.14</code>), the report adds a note that the host may have backported the fix.</p>
 <p><strong>WordPress.</strong> When the homepage looks like WordPress, the scanner lists the plugin and theme slugs that the
 page exposes, looks each one up on the WordPress.org API, and matches it against a WPScan-style feed
-(<code>WP_VULN_FEED_PATH</code>). The bundled feed in <code>patchwarden/data/wp_vuln_feed.json</code> is <strong>demo data with made-up
+(<code>WP_VULN_FEED_PATH</code>). The bundled feed in <code>src/patchwarden/data/wp_vuln_feed.json</code> is <strong>demo data with made-up
 IDs</strong>. The real WPScan API needs a paid token and is not used. If a plugin's version can't be seen, it is
 flagged as "check needed", never as "affected". These findings appear in their own section of the report and
 do not change the PHP risk score.</p>
@@ -207,7 +221,7 @@ the cloud metadata address and must be refused), <code>redirect-loop</code>.</p>
 </ul>
 <h2 id="credentials-and-logs">Credentials and logs</h2>
 <ul>
-<li>No credential appears in any response, log or error. <code>tests/test_canary_and_errors.py</code> sends random canary
+<li>No credential appears in any response, log or error. <code>tests/unit/test_canary_and_errors.py</code> sends random canary
   passwords through registration, login, validation errors, bad JSON and an unexpected crash. It then checks
   every response body and header, every log record and the audit log for the canaries, <code>JWT_SECRET</code> and
   <code>CREDENTIAL_KEY</code>.</li>
@@ -217,10 +231,10 @@ the cloud metadata address and must be refused), <code>redirect-loop</code>.</p>
 <li>A share-link token can't be used as a login token, and a login token can't be used as a share link.</li>
 <li>Hosting tokens are Fernet-encrypted at rest and decrypted only inside the adapter call. They never appear
   in an API response, the dashboard, a patch report, an audit entry, a backup or a log line.
-  <code>tests/test_phase2_acceptance.py::test_no_credential_in_logs_reports_or_responses</code> proves this with a canary
+  <code>tests/spec/test_phase2_acceptance.py::test_no_credential_in_logs_reports_or_responses</code> proves this with a canary
   token through the whole flow: dry run, approve, success, rollback, a rejected token, and invalid input.</li>
 <li><code>NVD_API_KEY</code> and <code>SMTP_PASSWORD</code> are redacted from logs. They never appear in alerts, emails, pages or
-  responses, and <code>tests/test_watchdog.py::test_watchdog_secrets_never_leak</code> checks this with canaries. SMTP
+  responses, and <code>tests/unit/test_watchdog.py::test_watchdog_secrets_never_leak</code> checks this with canaries. SMTP
   failures are logged by exception type only, because the server's reply can quote the login.</li>
 <li>The dashboard uses an HttpOnly, SameSite=Strict session cookie. Every form carries a CSRF token, and
   forms posted from another origin are refused.</li>
@@ -406,14 +420,14 @@ the cloud metadata address and must be refused), <code>redirect-loop</code>.</p>
 </tbody>
 </table>
 <h3 id="hosting-adapters">Hosting adapters</h3>
-<p>Every access method implements one interface (<code>patchwarden/patch/adapters.py</code>, <code>HostingAdapter</code>):
+<p>Every access method implements one interface (<code>src/patchwarden/patch/adapters.py</code>, <code>HostingAdapter</code>):
 <code>php_version</code>, <code>available_versions</code>, <code>create_backup</code>, <code>verify_restore</code>, <code>set_php_version</code>, <code>restart_php</code> and
 <code>restore_backup</code>.</p>
 <ul>
 <li><strong>Real adapters</strong> (<code>CpanelAdapter</code>, <code>PleskAdapter</code>, <code>AgentAdapter</code>) are stubs in this build. They refuse with
   <code>adapter_not_connected</code> and change nothing, rather than pretend. They still need to be built and tested
   against a real panel or staging account.</li>
-<li><strong>The fake adapter</strong> (<code>patchwarden/fakes.py</code>) runs the same interface against in-process fake hosts. Tests and
+<li><strong>The fake adapter</strong> (<code>src/patchwarden/fakes.py</code>) runs the same interface against in-process fake hosts. Tests and
   <code>make dev</code> use it for these demo sites only:</li>
 </ul>
 <table>
@@ -471,7 +485,7 @@ job on the 1st at 06:00 UTC. "Run Watchdog checks now" on the dashboard (<code>P
 check of your own sites straight away. Run one app process: each process starts its own scheduler. Alerts
 are deduplicated, so a second process only wastes requests.</p>
 <p><strong>In development</strong>, <code>CVE_FEED=fixture</code> (the default when demo sites are on) reads
-<code>patchwarden/data/cve_feed.demo.json</code> instead of NVD. To try an alert, add an entry in NVD format and press
+<code>src/patchwarden/data/cve_feed.demo.json</code> instead of NVD. To try an alert, add an entry in NVD format and press
 "Run Watchdog checks now". The shipped entry, <code>PHPG-DEMO-2026-0101</code>, is made up and affects PHP 8.3 before
 8.3.40, so <code>php83-unpatched.demo.patchwarden.test</code> and <code>shop83.demo.patchwarden.test</code> get an alert.</p>
 <p><strong>Billing hook, no payments.</strong> <code>subscriptions.status</code> is <code>active</code>, <code>past_due</code> or <code>cancelled</code>. Monitoring keeps
@@ -545,7 +559,7 @@ would connect. Each change is audited.</p>
    its own database and config files (<code>wp-config.php</code>, <code>.env</code>, and so on). If the staging code changed after
    it was tested, promotion stops with nothing changed, and you test and sign off again. The production
    promotion record links to the same before/after report as a patch (<code>/dashboard/patches/{id}</code>).</p>
-<p>The breakage rules (<code>patchwarden/migration/rules.py</code>) cover the PHP 7.0 → 8.4 migration guides. Breaking
+<p>The breakage rules (<code>src/patchwarden/migration/rules.py</code>) cover the PHP 7.0 → 8.4 migration guides. Breaking
 changes include the <code>mysql_*</code> and <code>ereg*</code> functions, <code>create_function</code>, <code>each</code>, <code>get_magic_quotes_*</code>,
 <code>money_format</code>, <code>__autoload</code>, <code>$s{0}</code> offsets, <code>(real)</code> / <code>(unset)</code> casts, <code>$php_errormsg</code>, <code>match</code> as a
 name, and IMAP being unbundled in 8.4. Deprecations to review include <code>strftime</code>, <code>mhash</code>,
@@ -682,7 +696,7 @@ comparisons). That is what the staging checks and your own review of staging are
 </tr>
 </tbody>
 </table>
-<p><strong>How the plugin is tested.</strong> <code>tests/wp_harness/harness.php</code> is a stand-in for the WordPress functions the
+<p><strong>How the plugin is tested.</strong> <code>tests/support/wp_harness/harness.php</code> is a stand-in for the WordPress functions the
 plugin uses: options, WP-Cron, hooks, transients, nonces, capabilities, upgraders, and HTTP through curl. It
 keeps its "database" in a JSON file. The tests run the real plugin code with PHP against a live Patchwarden
 server on localhost. They install, activate, save the key, report, run approved actions, show the settings
@@ -696,11 +710,11 @@ plugin in a real WordPress (for example WordPress Playground) is listed under Fu
    tests" (it passes), tick the box and "Sign off", then "Promote to production".
 3. <strong>Before/after report.</strong> "Before / after report for production" shows PHP 8.1.31 → 8.4.27, every check
    before and after, the backup, and who signed off.</p>
-<p><code>tests/test_migration_flow.py::test_custom_php81_site_passes_staging_first_time</code> and the Phase 4 acceptance tests cover the same path.</p>
+<p><code>tests/unit/test_migration_flow.py::test_custom_php81_site_passes_staging_first_time</code> and the Phase 4 acceptance tests cover the same path.</p>
 <h2 id="trust-hardening-phase-a">Trust hardening (Phase A)</h2>
 <p>These changes close the gaps where the trust promise was ahead of the code.</p>
 <h3 id="durable-jobs-and-crash-recovery">Durable jobs and crash recovery</h3>
-<p>Patch, rollback, staging and promotion runs are rows in the <code>jobs</code> table (<code>patchwarden/jobs.py</code>). An
+<p>Patch, rollback, staging and promotion runs are rows in the <code>jobs</code> table (<code>src/patchwarden/jobs.py</code>). An
 approval records the job and starts it straight away.</p>
 <ul>
 <li><strong>Claiming and leases.</strong> A worker claims a job with an atomic update that takes a lease
@@ -721,7 +735,7 @@ approval records the job and starts it straight away.</p>
 <li><strong>Plugin actions.</strong> A resumed WordPress Guard job never queues plugin actions twice.</li>
 </ul>
 <h3 id="encrypted-backups-and-retention">Encrypted backups and retention</h3>
-<p>Hosts hand Patchwarden the backup archive plus the checksum they computed. <code>patchwarden/backups.py</code>
+<p>Hosts hand Patchwarden the backup archive plus the checksum they computed. <code>src/patchwarden/patch/backups.py</code>
 then handles the rest:</p>
 <ul>
 <li><strong>Checksum check.</strong> The host's checksum is compared with the archive. A mismatch stops the patch with
@@ -959,7 +973,7 @@ No payment is taken here: the status field is still set by billing (or an admin)
 <h3 id="teams-and-roles">Teams and roles</h3>
 <p>An organisation (a "team": an agency and its clients, or a company's IT) shares sites between people.
 The site's owner keeps every right; team members get what their role allows. Every access decision goes
-through one helper, <code>patchwarden/access.py</code>.</p>
+through one helper, <code>src/patchwarden/security/access.py</code>.</p>
 <table>
 <thead>
 <tr>
@@ -1137,7 +1151,7 @@ with <code>referrerpolicy="no-referrer"</code>.</p>
 planned. A virtual patch is a WAF rule in front of the site that blocks attack-shaped requests before
 they reach PHP. It buys time; it does not replace the PHP update.</p>
 <h3 id="what-it-blocks">What it blocks</h3>
-<p><code>patchwarden/virtual_patch/signatures.py</code> lists generic PHP code-injection shapes. Each is matched
+<p><code>src/patchwarden/virtual_patch/signatures.py</code> lists generic PHP code-injection shapes. Each is matched
 after URL-decoding and lower-casing:</p>
 <ul>
 <li>ini overrides from the URL (<code>allow_url_include</code>, <code>auto_prepend_file</code>);</li>

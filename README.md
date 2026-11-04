@@ -290,12 +290,45 @@ Turn monitoring off, delete your token, or uninstall the plugin. Access ends imm
 | --- | --- |
 | Stack | Python 3.12, FastAPI with server-rendered pages, SQLAlchemy (PostgreSQL / SQLite), APScheduler, httpx, JWT + bcrypt, Fernet, Docker Compose |
 | Commands | `make dev`, `make test`, `make up`, `make env`, `make plugin`, `make check-config`, `make secret-scan` |
-| Tests | 224 automated tests: the acceptance tests for all five agents, security and canary tests, and the real WordPress plugin run under PHP |
+| Tests | 348 automated tests: the acceptance tests for all five agents (`tests/spec/`), the hardening and growth phases A–F (`tests/roadmap/`), focused unit, security and canary tests (`tests/unit/`), and the real WordPress plugin run under PHP |
 | API | OpenAPI docs at `/docs` in development |
-| Project layout | `patchwarden/` (the app and agents), `wordpress-plugin/` (the plugin), `tests/`, `docs/` |
+| Project layout | See [Repository layout](#repository-layout) below |
 | Specification | [SPEC.md](SPEC.md) is the build sheet. Every difference from it is listed in the [technical guide](docs/TECHNICAL.md#where-this-differs-from-the-spec). |
 | Full reference | [docs/TECHNICAL.md](docs/TECHNICAL.md): every flow, endpoint and safety rule, the demo hosts and the scoring rules |
 | Website | [`site/`](site), published to https://patchwarden.harshagv.me by GitHub Actions. Setup and updates: [docs/PUBLISHING-SITE.md](docs/PUBLISHING-SITE.md) |
+
+### Repository layout
+
+```text
+patchwarden/
+├── src/patchwarden/          the Python package (src layout: importable only once installed)
+│   ├── app.py                the app factory (create_app) and its schedule
+│   ├── config.py  models.py  db.py  errors.py  jobs.py  fakes.py
+│   ├── scanner/              agent 1: outside checks, version detection, WordPress components, SSRF-safe fetcher
+│   ├── patch/                agent 2: hosting adapters, encrypted backups, approve/update/check/roll back
+│   ├── watchdog/             agent 3: feeds (NVD, php.net, KEV, EPSS), matching, alerts, channels
+│   ├── migration/            agent 4: breakage rules, plan, quote, Rector/PHPStan sandbox, staging
+│   ├── wpguard/              agent 5: WordPress plugin reports, actions and download
+│   ├── virtual_patch/        edge shield: Cloudflare, Akamai, AWS WAF, demo WAF
+│   ├── security/             access rules, passwords and tokens, encryption, MFA, rate limits, audit chain
+│   ├── commerce/             billing export, white-label branding, signed attestations, SBOM
+│   ├── web/                  api/ (JSON endpoints), dashboard.py, templates/
+│   └── data/                 bundled demo feeds
+├── tests/
+│   ├── spec/                 SPEC.md acceptance tests, phases 1–5
+│   ├── roadmap/              phases A–F
+│   ├── unit/                 focused tests
+│   └── support/              the PHP harness that runs the real WordPress plugin
+├── wordpress-plugin/patchwarden/   the plugin (the inner folder name is the plugin's slug: WordPress needs it)
+├── site/                     the website (https://patchwarden.harshagv.me), built by scripts/build_site.py
+├── docs/                     TECHNICAL.md (full reference), PUBLISHING-SITE.md
+├── docker/php-tools/         the sandbox image for Rector and PHPStan
+├── scripts/                  make_env.py, build_site.py
+└── Dockerfile, docker-compose.yml, Makefile, pyproject.toml, SPEC.md
+```
+
+`make install` (run by every other `make` target) installs the package in editable mode, so
+`python -m patchwarden` works from anywhere with the project's virtual environment.
 
 ---
 

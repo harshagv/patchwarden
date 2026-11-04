@@ -7,8 +7,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY patchwarden ./patchwarden
+COPY src ./src
 COPY wordpress-plugin ./wordpress-plugin
+# Run from source (src layout): the app finds wordpress-plugin/ next to src/.
+ENV PYTHONPATH=/app/src
 RUN useradd --system --uid 10001 patchwarden && chown -R patchwarden /app
 USER patchwarden
 

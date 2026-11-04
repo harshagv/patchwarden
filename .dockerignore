@@ -8,3 +8,7 @@ __pycache__
 .pytest_cache
 tests
 dist
+.claude
+.ruff_cache
+site
+docs

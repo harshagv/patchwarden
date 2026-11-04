@@ -1,10 +1,29 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "patchwarden"
 version = "0.1.0"
 description = "Five agents that protect PHP sites after PHP2Shell (CVE-2026-109618 / CVE-2026-109619)."
 requires-python = ">=3.12"
 
+# src layout: the importable package is src/patchwarden. `make install` installs it in editable mode.
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+patchwarden = ["data/*.json", "web/templates/*.html", "web/templates/dashboard/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 addopts = "-ra"
 filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "."]
+
+[tool.ruff.lint.isort]
+known-first-party = ["patchwarden", "tests"]

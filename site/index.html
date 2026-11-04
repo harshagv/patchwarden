@@ -6,40 +6,176 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Patchwarden · A warden for every PHP site you look after</title>
-<meta name="description" content="Patchwarden finds PHP websites exposed to PHP2Shell, fixes them with the owner's approval, and watches them every day after. Self-hosted. No passwords.">
+<meta name="description" content="Patchwarden finds PHP websites exposed to PHP2Shell, fixes them with the owner's approval, blocks attacks at the edge until they can update, and watches them every day after. Self-hosted. No passwords.">
+<meta name="theme-color" content="#eeebe4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1917" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Patchwarden">
 <meta property="og:title" content="Patchwarden · A warden for every PHP site you look after">
 <meta property="og:description" content="Find, fix and watch every PHP site at risk from PHP2Shell, without ever asking for a password.">
 <meta property="og:url" content="https://patchwarden.harshagv.me/">
+<meta name="twitter:card" content="summary">
 <link rel="canonical" href="https://patchwarden.harshagv.me/">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/style.css">
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "Patchwarden",
+ "applicationCategory": "SecurityApplication", "operatingSystem": "Linux, macOS (Docker)",
+ "description": "Self-hosted agents that scan, patch, shield and watch PHP websites exposed to PHP2Shell.",
+ "url": "https://patchwarden.harshagv.me/", "license": "https://opensource.org/licenses/MIT",
+ "isAccessibleForFree": true, "codeRepository": "https://github.com/harshagv/patchwarden"}
+</script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-scan" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.2"/><path d="m20 20-4.4-4.4M8.6 11h4.8"/></symbol>
+  <symbol id="i-patch" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></symbol>
+  <symbol id="i-watch" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-move" viewBox="0 0 24 24"><rect x="3" y="5" width="7" height="14" rx="1.5"/><rect x="14" y="5" width="7" height="14" rx="1.5"/><path d="M7 12h10m-2.6-2.6L17 12l-2.6 2.6"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5m6-5v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/></symbol>
+  <symbol id="i-team" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.6 14.2A5 5 0 0 1 21 19"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="m8.8 12 2.2 2.2 4.4-4.4"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9m-3 3 3 3m-6 0 2 2"/></symbol>
+  <symbol id="i-approve" viewBox="0 0 24 24"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v4h4"/><path d="m9.6 14 2 2 4-4"/></symbol>
+  <symbol id="i-backup" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></symbol>
+  <symbol id="i-hidden" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 5.1Q11.3 5 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.3 4.2M6.1 6.1C3.6 7.8 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 4.2-1"/></symbol>
+  <symbol id="i-ruler" viewBox="0 0 24 24"><path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2m1-5 2 2m1-5 2 2"/></symbol>
+  <symbol id="i-brand" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-1.4-1.1-1.6-1.1-2.8 0-.9.7-1.5 1.6-1.5H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r=".9"/><circle cx="10" cy="7.4" r=".9"/><circle cx="14.6" cy="7.4" r=".9"/></symbol>
+  <symbol id="i-badge" viewBox="0 0 24 24"><circle cx="12" cy="9" r="6"/><path d="m8.6 14-1.6 7 5-2.5 5 2.5-1.6-7"/><path d="m9.5 9 1.8 1.8 3.2-3.3"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.5M4 12h.5M4 18h.5"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/></symbol>
+  <symbol id="i-receipt" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/><path d="M8 7.5h.5M8 16.5h.5"/></symbol>
+</svg>
 
 <header class="nav">
   <a class="brand" href="./"><img src="assets/favicon.svg" alt="" width="26" height="26"> Patchwarden</a>
   <nav class="nav__links" aria-label="Sections">
     <a href="#how">How it works</a>
     <a href="#agents">Agents</a>
+    <a href="#edge">Edge</a>
     <a href="#screens">Screens</a>
     <a href="#run">Run it</a>
     <a href="docs/">Docs</a>
     <a href="https://github.com/harshagv/patchwarden" rel="noopener">GitHub</a>
   </nav>
   <a class="button button--small" href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access</a>
+  <details class="nav__menu">
+    <summary aria-label="Menu">Menu</summary>
+    <nav aria-label="Sections (menu)">
+      <a href="#how">How it works</a><a href="#agents">Agents</a><a href="#edge">Edge</a><a href="#agencies">For agencies</a>
+      <a href="#screens">Screens</a><a href="#run">Run it</a><a href="#faq">FAQ</a><a href="docs/">Docs</a>
+      <a href="https://github.com/harshagv/patchwarden" rel="noopener">GitHub</a>
+      <a class="nav__menu-cta" href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access</a>
+    </nav>
+  </details>
 </header>
 
-<main>
+<main id="main">
 
 <section class="hero">
+  <div class="hero__copy">
   <p class="eyebrow">PHP2Shell · CVE-2026-109618 · CVE-2026-109619</p>
   <h1 class="display">A warden for every PHP site you look after.</h1>
   <p class="lede">Patchwarden finds the PHP websites exposed to PHP2Shell, fixes them with the owner's approval,
-    and watches them every day after. Self-hosted. No passwords. Nothing changes until someone says yes.</p>
+    shields the ones that can't update tonight, and watches them every day after. Self-hosted. No passwords.
+    Nothing changes until someone says yes.</p>
   <div class="actions">
     <a class="button" href="#screens">See what owners get</a>
     <a class="button button--ghost" href="https://github.com/harshagv/patchwarden" rel="noopener">Get the code</a>
   </div>
+  </div>
+  <figure class="hero__visual" aria-label="Animation: Patchwarden scans twelve sites, patches the exposed ones, and keeps watching">
+    <svg class="anim hv" viewBox="0 0 520 440" role="img" aria-hidden="true">
+      <defs><linearGradient id="hv-beam" x1="0" y1="0" x2="0" y2="1"><stop class="hv-beam-a" offset="0"/><stop class="hv-beam-b" offset="1"/></linearGradient></defs>
+      <rect class="hv-panel" x="1" y="1" width="518" height="438" rx="18"/>
+      <circle class="hv-light" cx="26" cy="28" r="5"/><circle class="hv-light" cx="44" cy="28" r="5"/><circle class="hv-light" cx="62" cy="28" r="5"/>
+      <text class="hv-title" x="84" y="32">warden · 12 client sites</text>
+      <text class="hv-live" x="494" y="32" text-anchor="end">● watching</text>
+      <line class="hv-rule" x1="1" y1="52" x2="519" y2="52"/>
+      <g class="hv-tile" transform="translate(28 74)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="58" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="40" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="50" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 8.4.13</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.4.27</text>
+      </g>
+      <g class="hv-tile" transform="translate(148 74)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="64" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="34" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="46" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 8.3.20</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.3.36</text>
+      </g>
+      <g class="hv-tile" transform="translate(268 74)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="52" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="44" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="30" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 8.2.20</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.2.35</text>
+      </g>
+      <g class="hv-tile" transform="translate(388 74)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="60" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="38" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="52" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 8.5.3</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.5.12</text>
+      </g>
+      <g class="hv-tile" transform="translate(28 178)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="58" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="40" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="50" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 7.4.33</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.4.27</text>
+      </g>
+      <g class="hv-tile" transform="translate(148 178)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="64" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="34" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="46" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 8.4.13</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.4.27</text>
+      </g>
+      <g class="hv-tile" transform="translate(268 178)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="52" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="44" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="30" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 8.3.20</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.3.36</text>
+      </g>
+      <g class="hv-tile" transform="translate(388 178)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="60" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="38" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="52" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 8.1.31</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.4.27</text>
+      </g>
+      <g class="hv-tile" transform="translate(28 282)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="58" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="40" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="50" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 8.2.20</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.2.35</text>
+      </g>
+      <g class="hv-tile" transform="translate(148 282)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="64" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="34" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="46" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 8.5.3</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.5.12</text>
+      </g>
+      <g class="hv-tile" transform="translate(268 282)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="52" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="44" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="30" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 8.4.13</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.4.27</text>
+      </g>
+      <g class="hv-tile" transform="translate(388 282)">
+        <rect class="hv-card" width="104" height="88" rx="10"/>
+        <rect class="hv-bar" x="12" y="14" width="60" height="6" rx="3"/><rect class="hv-bar" x="12" y="27" width="38" height="6" rx="3"/><rect class="hv-bar" x="12" y="40" width="52" height="6" rx="3"/>
+        <circle class="hv-dot" cx="88" cy="17" r="5.5"/>
+        <text class="hv-ver hv-old" x="12" y="72">PHP 8.3.20</text><text class="hv-ver hv-new" x="12" y="72">PHP 8.3.36</text>
+      </g>
+      <rect class="hv-beam" x="18" y="62" width="484" height="46" fill="url(#hv-beam)"/>
+      <g class="hv-legend" transform="translate(28 404)">
+        <circle class="hv-key hv-key--no" cx="6" cy="0" r="5"/><text x="18" y="4">Exposed</text>
+        <circle class="hv-key hv-key--wait" cx="104" cy="0" r="5"/><text x="116" y="4">Patching</text>
+        <circle class="hv-key hv-key--ok" cx="208" cy="0" r="5"/><text x="220" y="4">Protected</text>
+      </g>
+    </svg>
+  </figure>
   <ul class="facts" aria-label="Key facts">
     <li><strong>CVSS 9.2</strong><span>Take over a site without logging in</span></li>
     <li><strong>Exploited</strong><span>In CISA's KEV catalog since Oct 26, 2026</span></li>
@@ -55,28 +191,28 @@
   </header>
   <ol class="steps">
     <li class="reveal">
-      <span class="steps__n">1</span>
+      <span class="steps__head"><span class="steps__n">1</span><svg class="icon icon--lg" aria-hidden="true"><use href="#i-scan"/></svg></span>
       <h3>Scan it from the outside.</h3>
       <p>Enter a domain, or upload a CSV of up to 1,000 client sites. Each one gets a one-page report an owner can read:
         <em>your version, your risk, what to do next</em>. A hidden version is reported as unknown, never guessed.</p>
     </li>
     <li class="reveal">
-      <span class="steps__n">2</span>
+      <span class="steps__head"><span class="steps__n">2</span><svg class="icon icon--lg" aria-hidden="true"><use href="#i-approve"/></svg></span>
       <h3>Approve the fix.</h3>
       <p>Every update starts as a dry run that lists exactly what will happen. Once the owner approves, Patchwarden
         backs up, updates, restarts and checks the homepage, login and checkout pages.</p>
     </li>
     <li class="reveal">
-      <span class="steps__n">3</span>
+      <span class="steps__head"><span class="steps__n">3</span><svg class="icon icon--lg" aria-hidden="true"><use href="#i-watch"/></svg></span>
       <h3>Let it keep watch.</h3>
-      <p>Protected sites are re-checked every day, and every new PHP flaw is matched against them every hour.
-        The owner hears about a new risk the day it appears, and gets a safety report every month.</p>
+      <p>Protected sites are re-checked every day, and every new PHP flaw is matched the hour it is published.
+        Flaws attackers are already using reach the owner at once; the rest arrive as a daily digest.</p>
     </li>
     <li class="reveal">
-      <span class="steps__n">4</span>
+      <span class="steps__head"><span class="steps__n">4</span><svg class="icon icon--lg" aria-hidden="true"><use href="#i-move"/></svg></span>
       <h3>Move what can't be patched.</h3>
       <p>PHP 8.1 and older have no fix. Patchwarden finds the code that will break, down to the file and line,
-        tests the move on a staging copy, and goes live only after the owner signs off.</p>
+        gives a fixed price, tests the move on a staging copy, and goes live only after sign-off.</p>
     </li>
   </ol>
 </section>
@@ -86,6 +222,9 @@
     <h2 class="display">It never changes a site you haven't approved.</h2>
     <p>Every change starts as a dry run, is backed up first, and puts itself back if the homepage, login or
       checkout stops working, with a before/after report to prove it.</p>
+    <ol class="flow anim" aria-label="The order every change follows">
+      <li>Dry run</li><li>Owner approves</li><li>Backed up</li><li>PHP updated</li><li>Pages checked</li><li>Safe, or rolled back</li>
+    </ol>
   </div>
 </section>
 
@@ -99,40 +238,102 @@
   <div class="grid">
     <article class="card reveal">
       <p class="tag tag--free">Free</p>
-      <h3>Scanner</h3>
-      <p>An outside check of any site, or of a whole CSV of sites. It gives a one-page report with a signed link the owner can forward.</p>
+      <h3><svg class="icon card__icon" aria-hidden="true"><use href="#i-scan"/></svg>Scanner</h3>
+      <p>An outside check of any site, or of a whole CSV of sites, run in the background. A one-page report with a signed link the owner can forward; the details that would help an attacker need proof of ownership.</p>
       <dl><dt>Needs</dt><dd>Nothing</dd><dt>Earns</dt><dd>Your leads</dd></dl>
     </article>
     <article class="card reveal">
       <p class="tag">Per site</p>
-      <h3>Patch</h3>
-      <p>Backup, update, restart, test, and automatic rollback. A dry run comes first, and the owner's approval is always on record.</p>
+      <h3><svg class="icon card__icon" aria-hidden="true"><use href="#i-patch"/></svg>Patch</h3>
+      <p>Backup, update, restart, test, and automatic rollback. A dry run comes first, the owner's approval is always on record, and a crash mid-change is recovered from the backup.</p>
       <dl><dt>Needs</dt><dd>A cPanel or Plesk API token</dd><dt>Earns</dt><dd>A one-time fee per site</dd></dl>
     </article>
     <article class="card reveal">
       <p class="tag">Monthly</p>
-      <h3>Watchdog</h3>
-      <p>A version check every day and new-CVE matching every hour. Plain-language alerts arrive by email, and a safety report every month.</p>
+      <h3><svg class="icon card__icon" aria-hidden="true"><use href="#i-watch"/></svg>Watchdog</h3>
+      <p>A version check every day and new-flaw matching every hour, ranked by whether attackers use it (CISA KEV, EPSS). Alerts by email, Slack, Teams or a signed webhook, and an outcome report every month.</p>
       <dl><dt>Needs</dt><dd>Nothing (or the read-only plugin)</dd><dt>Earns</dt><dd>A monthly fee per site</dd></dl>
     </article>
     <article class="card reveal">
       <p class="tag">Project</p>
-      <h3>Migration</h3>
-      <p>A breakage report with file and line, an ordered fix plan with an effort estimate, staging tests, then sign-off and go-live.</p>
+      <h3><svg class="icon card__icon" aria-hidden="true"><use href="#i-move"/></svg>Migration</h3>
+      <p>A breakage report with file and line, checked by Rector and PHPStan in a sandbox. An ordered fix plan, an instant fixed-price quote, staging tests, then sign-off and go-live.</p>
       <dl><dt>Needs</dt><dd>A panel token and a staging copy</dd><dt>Earns</dt><dd>A project price</dd></dl>
     </article>
     <article class="card reveal">
       <p class="tag">Per site · monthly</p>
-      <h3>WordPress Guard</h3>
+      <h3><svg class="icon card__icon" aria-hidden="true"><use href="#i-plug"/></svg>WordPress Guard</h3>
       <p>Scan, patch and watch in one product: a safety score, a fix list without jargon, and one <em>Fix it</em> button.</p>
       <dl><dt>Needs</dt><dd>The Patchwarden plugin</dd><dt>Earns</dt><dd>A monthly fee, at volume</dd></dl>
     </article>
     <article class="card card--accent reveal">
-      <h3>Made for people who look after many sites</h3>
+      <h3><svg class="icon card__icon" aria-hidden="true"><use href="#i-team"/></svg>Made for people who look after many sites</h3>
       <p>Agencies, hosting resellers, freelancers and managed-service providers. Scan your whole client list in one
-        upload, then offer the fix and the monthly watch.</p>
-      <a class="link" href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access →</a>
+        upload, then offer the fix, the shield and the monthly watch.</p>
+      <a class="link" href="#agencies">What agencies get →</a>
     </article>
+  </div>
+</section>
+
+<section class="section section--alt" id="edge">
+  <div class="split">
+    <header class="split__text reveal">
+      <p class="eyebrow">Can't update tonight?</p>
+      <h2 class="display">Shield it at the edge first.</h2>
+      <p class="section__sub">A change freeze, an old plugin, a migration still being planned: some sites can't take
+        the PHP update today. A virtual patch blocks attack-shaped requests at your CDN or firewall, before they
+        reach PHP. It buys time; it doesn't replace the update.</p>
+      <ul class="checks">
+        <li>Dry run first: you see the exact rule before anything is sent.</li>
+        <li>Approved by a person, applied by a crash-safe job, removed in one click.</li>
+        <li>Only its own tagged rule is touched. Your other rules stay as they are.</li>
+      </ul>
+    </header>
+    <div class="edge-side">
+    <figure class="edge-diagram reveal" aria-label="Diagram: attack requests are stopped at the edge firewall; normal requests reach the PHP site">
+      <svg class="anim vp" viewBox="0 0 560 250" role="img" aria-hidden="true">
+        <line class="vp-lane" x1="86" y1="80" x2="474" y2="80"/><line class="vp-lane" x1="86" y1="125" x2="474" y2="125"/><line class="vp-lane" x1="86" y1="170" x2="474" y2="170"/>
+        <g class="vp-node" transform="translate(44 125)"><circle r="34"/><use href="#i-globe" x="-15" y="-15" width="30" height="30"/></g>
+        <text class="vp-label" x="44" y="190" text-anchor="middle">Internet</text>
+        <g class="vp-node vp-node--shield" transform="translate(300 125)"><rect x="-26" y="-88" width="52" height="176" rx="14"/><use href="#i-shield" x="-17" y="-17" width="34" height="34"/></g>
+        <text class="vp-label" x="300" y="236" text-anchor="middle">Edge firewall</text>
+        <g class="vp-node vp-node--site" transform="translate(516 125)"><circle r="34"/><use href="#i-server" x="-15" y="-15" width="30" height="30"/></g>
+        <text class="vp-label" x="516" y="190" text-anchor="middle">PHP site</text>
+        <text class="vp-attack" x="96" y="66">?-d allow_url_include=1</text>
+        <circle class="vp-packet vp-packet--good" cx="86" cy="125" r="7"/>
+        <circle class="vp-packet vp-packet--bad" cx="86" cy="80" r="7"/>
+        <circle class="vp-packet vp-packet--good" cx="86" cy="170" r="7"/>
+        <circle class="vp-packet vp-packet--bad" cx="86" cy="170" r="7"/>
+        <circle class="vp-packet vp-packet--good" cx="86" cy="80" r="7"/>
+        <circle class="vp-packet vp-packet--bad" cx="86" cy="125" r="7"/>
+        <text class="vp-blocked" x="300" y="22" text-anchor="middle">blocked before PHP</text>
+      </svg>
+    </figure>
+    <ul class="providers reveal" aria-label="Edge providers">
+      <li><strong>Cloudflare</strong><span>A custom WAF rule in your zone, with a token limited to that zone.</span>
+        <em class="pill pill--ok">Ready</em></li>
+      <li><strong>AWS WAF</strong><span>The AWS managed PHP rule group plus a block rule, added to your web ACL. Also the answer for Shield Advanced.</span>
+        <em class="pill pill--ok">Ready</em></li>
+      <li><strong>Akamai</strong><span>A custom rule on your security policy, signed with EdgeGrid.</span>
+        <em class="pill pill--wait">Not yet verified on a live account</em></li>
+    </ul>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="agencies">
+  <header class="section__head reveal">
+    <p class="eyebrow">For agencies and teams</p>
+    <h2 class="display">Run it as your own service.</h2>
+    <p class="section__sub">Everything a team needs to look after client sites together, and to show the work.</p>
+  </header>
+  <div class="grid grid--features">
+    <div class="feature reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-team"/></svg><h3>Teams and four-eyes</h3><p>Owner, admin, member, approver and viewer roles. Turn on the four-eyes rule and whoever planned a change can't approve it.</p></div>
+    <div class="feature reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-brand"/></svg><h3>Your brand</h3><p>Your name, colour, logo and footer on every alert, monthly report and email your clients get.</p></div>
+    <div class="feature reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-badge"/></svg><h3>A badge they can verify</h3><p>A signed "PHP patched" statement (Ed25519) with a public check and a badge for the client's site. Anyone can verify it offline.</p></div>
+    <div class="feature reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-list"/></svg><h3>Software inventory</h3><p>A CycloneDX SBOM per site: PHP, WordPress core, plugins and themes, Composer packages, and the known flaws in each.</p></div>
+    <div class="feature reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-bell"/></svg><h3>Alerts where you work</h3><p>Slack, Microsoft Teams, or a webhook signed with HMAC-SHA256, next to email. Webhook addresses are stored encrypted.</p></div>
+    <div class="feature reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-receipt"/></svg><h3>Nothing given away</h3><p>Every approved patch, active shield and accepted quote lands in a monthly billing export for your invoicing.</p></div>
   </div>
 </section>
 
@@ -143,12 +344,12 @@
     <p class="section__sub">These rules are enforced in the code and covered by automated tests, not just written in a policy.</p>
   </header>
   <div class="grid grid--trust">
-    <div class="reveal"><h3>No password, ever.</h3><p>Owners give an API token they create in their hosting panel, or install the plugin. Tokens are encrypted, and never shown again.</p></div>
-    <div class="reveal"><h3>Approval on the record.</h3><p>Who approved, and when, is saved before anything runs. Every action lands in a tamper-evident, hash-chained audit log.</p></div>
-    <div class="reveal"><h3>Backups you can prove.</h3><p>Each backup is encrypted, checked by checksum and a restore dry-run, and deleted after 30 days. If the server stops mid-change, the site is put back from it.</p></div>
-    <div class="reveal"><h3>Revocable in one click.</h3><p>Delete the token or uninstall the plugin, and access ends on both sides.</p></div>
-    <div class="reveal"><h3>Nothing leaks.</h3><p>Canary tests prove no credential reaches a response, report, alert, email or log.</p></div>
-    <div class="reveal"><h3>No AI guessing.</h3><p>The agents are deterministic checkers. A hidden version stays "unknown" until it can be checked from the inside.</p></div>
+    <div class="reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-key"/></svg><h3>No password, ever.</h3><p>Owners give an API token they create in their hosting panel, or install the plugin. Tokens are encrypted, never shown again, and revoked in one click.</p></div>
+    <div class="reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-approve"/></svg><h3>Approval on the record.</h3><p>Who approved, and when, is saved before anything runs. Every action lands in a tamper-evident, hash-chained audit log.</p></div>
+    <div class="reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-backup"/></svg><h3>Backups you can prove.</h3><p>Each backup is encrypted, checked by checksum and a restore dry-run, and deleted after 30 days. If the server stops mid-change, the site is put back from it.</p></div>
+    <div class="reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-box"/></svg><h3>Untrusted code stays in a box.</h3><p>Rector, PHPStan and <code>php -l</code> run in a container with no network, a read-only file system and no privileges.</p></div>
+    <div class="reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-hidden"/></svg><h3>Nothing leaks.</h3><p>Canary tests prove no credential reaches a response, report, alert, email or log. Two-step login and rate limits guard the dashboard.</p></div>
+    <div class="reveal"><svg class="icon icon--lg" aria-hidden="true"><use href="#i-ruler"/></svg><h3>No AI guessing.</h3><p>The agents are deterministic checkers. A hidden version stays "unknown" until it can be checked from the inside.</p></div>
   </div>
 </section>
 
@@ -161,11 +362,11 @@
   <div class="screens reveal">
     <div class="screens__tabs" role="tablist" aria-label="Example screens">
       <button role="tab" aria-selected="true" data-src="examples/report.html">1-page report</button>
-      <button role="tab" aria-selected="false" data-src="examples/patch.html">Before / after</button>
-      <button role="tab" aria-selected="false" data-src="examples/rollback.html">Automatic rollback</button>
-      <button role="tab" aria-selected="false" data-src="examples/migration.html">Migration plan</button>
-      <button role="tab" aria-selected="false" data-src="examples/wp-guard.html">WordPress Guard</button>
-      <button role="tab" aria-selected="false" data-src="examples/alerts.html">Alerts</button>
+      <button role="tab" aria-selected="false" tabindex="-1" data-src="examples/patch.html">Before / after</button>
+      <button role="tab" aria-selected="false" tabindex="-1" data-src="examples/rollback.html">Automatic rollback</button>
+      <button role="tab" aria-selected="false" tabindex="-1" data-src="examples/migration.html">Migration plan</button>
+      <button role="tab" aria-selected="false" tabindex="-1" data-src="examples/wp-guard.html">WordPress Guard</button>
+      <button role="tab" aria-selected="false" tabindex="-1" data-src="examples/alerts.html">Alerts</button>
     </div>
     <div class="browser">
       <div class="browser__bar"><span></span><span></span><span></span><p class="browser__url">patchwarden · example</p>
@@ -205,8 +406,8 @@ make env</code></pre>
   </ol>
   <div class="note reveal">
     <h3>Try it first, on your laptop</h3>
-    <p><code>make dev</code> starts Patchwarden with built-in demo websites and pretend hosting panels, so you need no accounts and no secrets.
-      Patch a site, watch one roll itself back, and plan a migration from PHP 7.4, all in about five minutes.
+    <p><code>make dev</code> starts Patchwarden with built-in demo websites, pretend hosting panels and a demo edge firewall, so you need no accounts and no secrets.
+      Patch a site, watch one roll itself back, shield one at the edge, and plan a migration from PHP 7.4, all in about five minutes.
       The <a href="docs/#run-it">guide</a> walks through it.</p>
   </div>
 </section>
@@ -221,16 +422,40 @@ make env</code></pre>
     <table class="status">
       <thead><tr><th>Area</th><th>Status</th></tr></thead>
       <tbody>
-        <tr><td>Scanner, one-page reports, CSV bulk scans, WordPress plugin and theme check</td><td><span class="pill pill--ok">Ready</span></td></tr>
-        <tr><td>Approval, backup, checks, automatic rollback and audit log</td><td><span class="pill pill--ok">Ready</span> tested against simulated hosting panels</td></tr>
-        <tr><td>Watchdog: daily checks, CVE and release matching, alerts, monthly reports</td><td><span class="pill pill--ok">Ready</span></td></tr>
-        <tr><td>Migration: breakage scan, plan, staging, sign-off, promotion</td><td><span class="pill pill--ok">Ready</span> tested against simulated hosting</td></tr>
+        <tr><td>Scanner, one-page reports, background CSV scans, ownership verification, WordPress plugin and theme check</td><td><span class="pill pill--ok">Ready</span></td></tr>
+        <tr><td>Approval, encrypted backup, checks, automatic rollback, crash recovery and audit log</td><td><span class="pill pill--ok">Ready</span> tested against simulated hosting panels</td></tr>
+        <tr><td>Watchdog: daily checks, hourly matching, KEV and EPSS priority, digest, Slack, Teams and webhooks, outcome reports</td><td><span class="pill pill--ok">Ready</span></td></tr>
+        <tr><td>Migration: breakage scan, Rector and PHPStan in a sandbox, fixed-price quote, staging, sign-off, promotion</td><td><span class="pill pill--ok">Ready</span> tested against simulated hosting; Rector and PHPStan need the tools image built once</td></tr>
+        <tr><td>Teams and roles, four-eyes rule, white-label, signed badges, SBOM, billing export</td><td><span class="pill pill--ok">Ready</span></td></tr>
+        <tr><td>Virtual patch on Cloudflare and AWS WAF</td><td><span class="pill pill--ok">Ready</span> tested against each provider's API format</td></tr>
+        <tr><td>Virtual patch on Akamai</td><td><span class="pill pill--wait">Built, not yet verified</span> follows Akamai's public API reference</td></tr>
         <tr><td>WordPress plugin</td><td><span class="pill pill--ok">Ready</span> not yet tested inside a full WordPress install</td></tr>
         <tr><td>Real cPanel and Plesk connections</td><td><span class="pill pill--wait">Not connected yet</span> the interface is ready, and the connectors refuse to act rather than pretend</td></tr>
         <tr><td>Docker deployment</td><td><span class="pill pill--wait">Written, not yet run end to end</span></td></tr>
-        <tr><td>Payments and agency white-label billing</td><td><span class="pill pill--no">Not in this release</span></td></tr>
+        <tr><td>Taking payments</td><td><span class="pill pill--no">Not in this release</span> subscription status, payment reminders and the billing export are ready for it</td></tr>
       </tbody>
     </table>
+  </div>
+</section>
+
+<section class="section section--alt" id="faq">
+  <header class="section__head reveal">
+    <p class="eyebrow">Questions</p>
+    <h2 class="display">Before you ask.</h2>
+  </header>
+  <div class="faq reveal">
+    <details><summary>Do site owners have to give you their password?</summary>
+      <p>No. They create an API token in their hosting panel (cPanel or Plesk) or install the WordPress plugin. Either can be revoked at any time, and access ends on both sides.</p></details>
+    <details><summary>What happens if an update breaks the site?</summary>
+      <p>After every change Patchwarden checks the homepage, the login page and the checkout. If any of them fails, it restores the backup and switches PHP back on its own, then sends a before/after report.</p></details>
+    <details><summary>Is a virtual patch enough on its own?</summary>
+      <p>No. It blocks the request shapes that PHP remote-code-execution attacks use, which buys time. The real fix is the PHP update or the migration, and the shield comes off once that is done.</p></details>
+    <details><summary>Does anything leave my server?</summary>
+      <p>Patchwarden is self-hosted. It calls the public advisory feeds (NVD, php.net, CISA KEV, FIRST EPSS), the sites you scan, and the hosting panels, edge providers and alert channels you connect. Nothing else.</p></details>
+    <details><summary>Does it use AI to decide what to change?</summary>
+      <p>No. Every agent is a deterministic checker with tests. Where it cannot see something, it says "unknown" instead of guessing.</p></details>
+    <details><summary>Is it free?</summary>
+      <p>The code is open source under the MIT licence: run it yourself. If you want help running it for your clients, get in touch.</p></details>
   </div>
 </section>
 
@@ -251,19 +476,22 @@ make env</code></pre>
   <div class="footer__cols">
     <div>
       <a class="brand" href="./"><img src="assets/favicon.svg" alt="" width="22" height="22"> Patchwarden</a>
-      <p class="footer__note">Find, fix and watch every PHP site at risk, without ever asking for a password.</p>
+      <p class="footer__note">Find, fix, shield and watch every PHP site at risk, without ever asking for a password.</p>
     </div>
     <nav aria-label="Project"><h2>Project</h2>
-      <a href="#how">How it works</a><a href="#agents">Agents</a><a href="#status">What is ready today</a>
-      <a href="https://github.com/harshagv/patchwarden" rel="noopener">Source code</a>
-      <a href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access</a></nav>
+      <a href="#how">How it works</a><a href="#agents">Agents</a><a href="#edge">Edge shield</a>
+      <a href="#agencies">For agencies</a><a href="#status">What is ready today</a>
+      <a href="https://github.com/harshagv/patchwarden" rel="noopener">Source code</a></nav>
     <nav aria-label="Documentation"><h2>Documentation</h2>
       <a href="docs/">Technical guide</a><a href="docs/#run-it">Quick start</a>
       <a href="docs/#the-approval-and-rollback-flow">Approval and rollback</a>
+      <a href="docs/#virtual-patches-at-the-edge-phase-e">Virtual patches</a>
       <a href="docs/#wordpress-guard-phase-5">WordPress plugin</a></nav>
     <nav aria-label="Trust"><h2>Trust</h2>
       <a href="#trust">Trust rules</a><a href="docs/#credentials-and-logs">Security</a>
-      <a href="docs/#secrets">Secrets and settings</a></nav>
+      <a href="docs/#trust-hardening-phase-a">Trust hardening</a>
+      <a href="docs/#secrets">Secrets and settings</a>
+      <a href="https://www.linkedin.com/in/harshagv/" rel="noopener">Contact</a></nav>
   </div>
   <p class="footer__legal">This site sets no cookies and loads nothing from third parties. · Open source under the MIT licence. · Patchwarden is not
     affiliated with The PHP Group. PHP is a trademark of The PHP Group. · <a href="https://www.harshagv.me/">harshagv.me</a></p>

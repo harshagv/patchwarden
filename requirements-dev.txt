@@ -2,3 +2,5 @@
 pytest==9.2.0
 # Builds the website's docs page (make site)
 markdown==3.10
+# Keeps imports sorted after moves (ruff check --select I --fix src tests scripts)
+ruff==0.17.3

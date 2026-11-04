@@ -1,3 +1,5 @@
 User-agent: *
 Allow: /
 Disallow: /examples/
+
+Sitemap: https://patchwarden.harshagv.me/sitemap.xml

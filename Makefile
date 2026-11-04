@@ -15,10 +15,11 @@ help:
 	@echo "make plugin       build dist/patchwarden.zip (WordPress plugin) for PUBLIC_BASE_URL"
 	@echo "make site         rebuild the website's docs page and example screens in site/"
 
-$(BIN)/python: requirements.txt requirements-dev.txt
+$(BIN)/python: requirements.txt requirements-dev.txt pyproject.toml
 	$(PYTHON) -m venv $(VENV)
 	$(BIN)/pip install -q --upgrade pip
 	$(BIN)/pip install -q -r requirements-dev.txt
+	$(BIN)/pip install -q --no-deps -e .
 	@touch $(BIN)/python
 
 install: $(BIN)/python

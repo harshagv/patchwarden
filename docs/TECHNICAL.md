@@ -87,7 +87,7 @@ is found (for example `8.1.2-1ubuntu2.14`), the report adds a note that the host
 
 **WordPress.** When the homepage looks like WordPress, the scanner lists the plugin and theme slugs that the
 page exposes, looks each one up on the WordPress.org API, and matches it against a WPScan-style feed
-(`WP_VULN_FEED_PATH`). The bundled feed in `patchwarden/data/wp_vuln_feed.json` is **demo data with made-up
+(`WP_VULN_FEED_PATH`). The bundled feed in `src/patchwarden/data/wp_vuln_feed.json` is **demo data with made-up
 IDs**. The real WPScan API needs a paid token and is not used. If a plugin's version can't be seen, it is
 flagged as "check needed", never as "affected". These findings appear in their own section of the report and
 do not change the PHP risk score.
@@ -115,7 +115,7 @@ The scanner fetches addresses that users supply, from our server. Every hop (the
 
 ## Credentials and logs
 
-- No credential appears in any response, log or error. `tests/test_canary_and_errors.py` sends random canary
+- No credential appears in any response, log or error. `tests/unit/test_canary_and_errors.py` sends random canary
   passwords through registration, login, validation errors, bad JSON and an unexpected crash. It then checks
   every response body and header, every log record and the audit log for the canaries, `JWT_SECRET` and
   `CREDENTIAL_KEY`.
@@ -125,10 +125,10 @@ The scanner fetches addresses that users supply, from our server. Every hop (the
 - A share-link token can't be used as a login token, and a login token can't be used as a share link.
 - Hosting tokens are Fernet-encrypted at rest and decrypted only inside the adapter call. They never appear
   in an API response, the dashboard, a patch report, an audit entry, a backup or a log line.
-  `tests/test_phase2_acceptance.py::test_no_credential_in_logs_reports_or_responses` proves this with a canary
+  `tests/spec/test_phase2_acceptance.py::test_no_credential_in_logs_reports_or_responses` proves this with a canary
   token through the whole flow: dry run, approve, success, rollback, a rejected token, and invalid input.
 - `NVD_API_KEY` and `SMTP_PASSWORD` are redacted from logs. They never appear in alerts, emails, pages or
-  responses, and `tests/test_watchdog.py::test_watchdog_secrets_never_leak` checks this with canaries. SMTP
+  responses, and `tests/unit/test_watchdog.py::test_watchdog_secrets_never_leak` checks this with canaries. SMTP
   failures are logged by exception type only, because the server's reply can quote the login.
 - The dashboard uses an HttpOnly, SameSite=Strict session cookie. Every form carries a CSRF token, and
   forms posted from another origin are refused.
@@ -224,14 +224,14 @@ Plan (dry run) ──owner clicks Approve──▶ backup + verify ──▶ bef
 
 ### Hosting adapters
 
-Every access method implements one interface (`patchwarden/patch/adapters.py`, `HostingAdapter`):
+Every access method implements one interface (`src/patchwarden/patch/adapters.py`, `HostingAdapter`):
 `php_version`, `available_versions`, `create_backup`, `verify_restore`, `set_php_version`, `restart_php` and
 `restore_backup`.
 
 - **Real adapters** (`CpanelAdapter`, `PleskAdapter`, `AgentAdapter`) are stubs in this build. They refuse with
   `adapter_not_connected` and change nothing, rather than pretend. They still need to be built and tested
   against a real panel or staging account.
-- **The fake adapter** (`patchwarden/fakes.py`) runs the same interface against in-process fake hosts. Tests and
+- **The fake adapter** (`src/patchwarden/fakes.py`) runs the same interface against in-process fake hosts. Tests and
   `make dev` use it for these demo sites only:
 
 | Demo host | Starts on | What happens when you patch it |
@@ -273,7 +273,7 @@ check of your own sites straight away. Run one app process: each process starts 
 are deduplicated, so a second process only wastes requests.
 
 **In development**, `CVE_FEED=fixture` (the default when demo sites are on) reads
-`patchwarden/data/cve_feed.demo.json` instead of NVD. To try an alert, add an entry in NVD format and press
+`src/patchwarden/data/cve_feed.demo.json` instead of NVD. To try an alert, add an entry in NVD format and press
 "Run Watchdog checks now". The shipped entry, `PHPG-DEMO-2026-0101`, is made up and affects PHP 8.3 before
 8.3.40, so `php83-unpatched.demo.patchwarden.test` and `shop83.demo.patchwarden.test` get an alert.
 
@@ -326,7 +326,7 @@ This is for PHP 8.2 and older. 8.1 and older have no official patch, and 8.2 los
    it was tested, promotion stops with nothing changed, and you test and sign off again. The production
    promotion record links to the same before/after report as a patch (`/dashboard/patches/{id}`).
 
-The breakage rules (`patchwarden/migration/rules.py`) cover the PHP 7.0 → 8.4 migration guides. Breaking
+The breakage rules (`src/patchwarden/migration/rules.py`) cover the PHP 7.0 → 8.4 migration guides. Breaking
 changes include the `mysql_*` and `ereg*` functions, `create_function`, `each`, `get_magic_quotes_*`,
 `money_format`, `__autoload`, `$s{0}` offsets, `(real)` / `(unset)` casts, `$php_errormsg`, `match` as a
 name, and IMAP being unbundled in 8.4. Deprecations to review include `strftime`, `mhash`,
@@ -401,7 +401,7 @@ This is one product for WordPress owners: the Scanner, Patch and Watchdog behind
 | `GET /api/wp-guard/plugin.zip`, `/dashboard/wp-guard-plugin.zip` | owner | The plugin, set up for this server |
 | `POST /api/plugin/report`, `GET /api/plugin/actions`, `POST /api/plugin/actions/{id}/result`, `POST /api/plugin/disconnect` | plugin (`X-Patchwarden-Key`) | Report, pull approved actions, report results, switch the key off |
 
-**How the plugin is tested.** `tests/wp_harness/harness.php` is a stand-in for the WordPress functions the
+**How the plugin is tested.** `tests/support/wp_harness/harness.php` is a stand-in for the WordPress functions the
 plugin uses: options, WP-Cron, hooks, transients, nonces, capabilities, upgraders, and HTTP through curl. It
 keeps its "database" in a JSON file. The tests run the real plugin code with PHP against a live Patchwarden
 server on localhost. They install, activate, save the key, report, run approved actions, show the settings
@@ -418,7 +418,7 @@ With `make dev`, register (`POST /api/auth/register`) and log in at `/dashboard`
 3. **Before/after report.** "Before / after report for production" shows PHP 8.1.31 → 8.4.27, every check
    before and after, the backup, and who signed off.
 
-`tests/test_migration_flow.py::test_custom_php81_site_passes_staging_first_time` and the Phase 4 acceptance tests cover the same path.
+`tests/unit/test_migration_flow.py::test_custom_php81_site_passes_staging_first_time` and the Phase 4 acceptance tests cover the same path.
 
 ## Trust hardening (Phase A)
 
@@ -426,7 +426,7 @@ These changes close the gaps where the trust promise was ahead of the code.
 
 ### Durable jobs and crash recovery
 
-Patch, rollback, staging and promotion runs are rows in the `jobs` table (`patchwarden/jobs.py`). An
+Patch, rollback, staging and promotion runs are rows in the `jobs` table (`src/patchwarden/jobs.py`). An
 approval records the job and starts it straight away.
 
 - **Claiming and leases.** A worker claims a job with an atomic update that takes a lease
@@ -448,7 +448,7 @@ approval records the job and starts it straight away.
 
 ### Encrypted backups and retention
 
-Hosts hand Patchwarden the backup archive plus the checksum they computed. `patchwarden/backups.py`
+Hosts hand Patchwarden the backup archive plus the checksum they computed. `src/patchwarden/patch/backups.py`
 then handles the rest:
 
 - **Checksum check.** The host's checksum is compared with the archive. A mismatch stops the patch with
@@ -660,7 +660,7 @@ No payment is taken here: the status field is still set by billing (or an admin)
 
 An organisation (a "team": an agency and its clients, or a company's IT) shares sites between people.
 The site's owner keeps every right; team members get what their role allows. Every access decision goes
-through one helper, `patchwarden/access.py`.
+through one helper, `src/patchwarden/security/access.py`.
 
 | Action | owner | admin | member | approver | viewer |
 |---|:-:|:-:|:-:|:-:|:-:|
@@ -761,7 +761,7 @@ they reach PHP. It buys time; it does not replace the PHP update.
 
 ### What it blocks
 
-`patchwarden/virtual_patch/signatures.py` lists generic PHP code-injection shapes. Each is matched
+`src/patchwarden/virtual_patch/signatures.py` lists generic PHP code-injection shapes. Each is matched
 after URL-decoding and lower-casing:
 
 - ini overrides from the URL (`allow_url_include`, `auto_prepend_file`);

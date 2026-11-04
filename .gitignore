@@ -224,8 +224,10 @@ __marimo__/
 .env
 .env.*
 !.env.example
-# Local state and build output (root only: patchwarden/data/ holds the app's feed files and must be committed)
+# Local state and build output (root only: src/patchwarden/data/ holds the app's feed files and must be committed)
 /data/
 /dist/
 *.db
 *.sqlite3
+
+*.DS_Store

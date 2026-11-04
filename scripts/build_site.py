@@ -40,23 +40,37 @@ def page(title: str, description: str, body: str, *, depth: int = 1) -> str:
 <meta name="referrer" content="no-referrer">
 <title>{html.escape(title)}</title>
 <meta name="description" content="{html.escape(description)}">
+<meta name="theme-color" content="#eeebe4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1917" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://patchwarden.harshagv.me/docs/">
 <link rel="icon" href="{up}assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="{up}assets/style.css">
 </head>
 <body class="docs-page">
+<a class="skip" href="#main">Skip to content</a>
 <header class="nav">
   <a class="brand" href="{up}"><img src="{up}assets/favicon.svg" alt="" width="26" height="26"> Patchwarden</a>
   <nav class="nav__links">
     <a href="{up}#how">How it works</a>
     <a href="{up}#agents">Agents</a>
+    <a href="{up}#edge">Edge</a>
     <a href="{up}#screens">Screens</a>
     <a href="{up}#run">Run it</a>
     <a href="{up}docs/" aria-current="page">Docs</a>
     <a href="https://github.com/harshagv/patchwarden" rel="noopener">GitHub</a>
   </nav>
   <a class="button button--small" href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access</a>
+  <details class="nav__menu">
+    <summary aria-label="Menu">Menu</summary>
+    <nav aria-label="Sections (menu)">
+      <a href="{up}">Overview</a><a href="{up}#how">How it works</a><a href="{up}#agents">Agents</a>
+      <a href="{up}#edge">Edge</a><a href="{up}#run">Run it</a><a href="{up}#faq">FAQ</a>
+      <a href="https://github.com/harshagv/patchwarden" rel="noopener">GitHub</a>
+      <a class="nav__menu-cta" href="https://www.linkedin.com/in/harshagv/" rel="noopener">Request access</a>
+    </nav>
+  </details>
 </header>
-<main class="docs">
+<main class="docs" id="main">
 {body}
 </main>
 <footer class="footer footer--slim">
@@ -79,7 +93,8 @@ def build_docs() -> None:
                            extension_configs={"toc": {"toc_depth": "2-2", "permalink": False}})
     body_html = md.convert(src)
     toc = md.toc  # type: ignore[attr-defined]
-    body = (f'<aside class="docs__toc"><p class="eyebrow">On this page</p>{toc}</aside>'
+    # A <details> so the long contents list can fold away on phones (site.js opens it on wide screens).
+    body = (f'<details class="docs__toc" open><summary><p class="eyebrow">On this page</p></summary>{toc}</details>'
             f'<article class="docs__body">{body_html}</article>')
     out = SITE / "docs" / "index.html"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -117,7 +132,7 @@ def build_examples() -> dict[str, str]:
                       DEMO_SITES="true", CVE_FEED="fixture", BACKUP_DIR=backup_dir,
                       PUBLIC_BASE_URL="https://app.patchwarden.example", WATCHDOG_SCHEDULER="false")
     os.environ.pop("CREDENTIAL_KEY", None)
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(ROOT / "src"))
     from fastapi.testclient import TestClient
 
     from patchwarden.app import create_app
