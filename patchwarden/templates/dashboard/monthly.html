@@ -1,8 +1,9 @@
 {% extends "dashboard/layout.html" %}
 {% block title %}Monthly safety report: {{ site.domain }} {{ report.month }}{% endblock %}
 {% block page %}
-<div class="card">
-  <p class="muted">Patchwarden monthly safety report · {{ report.month }}</p>
+<div class="card"{% if report.branding.color %} style="border-top: 4px solid {{ report.branding.color }}"{% endif %}>
+  {% if report.branding.logo_url %}<img src="{{ report.branding.logo_url }}" alt="{{ report.branding.name }}" style="max-height:40px" referrerpolicy="no-referrer">{% endif %}
+  <p class="muted">{{ report.branding.name }} monthly safety report · {{ report.month }}</p>
   <h1>{{ site.domain }}</h1>
   <p><strong>{{ report.summary }}</strong></p>
   <div class="grid">
@@ -10,6 +11,14 @@
       <h2>Your site today</h2>
       <p>PHP {{ report.current.php_version or "hidden" }} ·
          <span class="badge risk-{{ report.current.risk }}">{{ risk_labels[report.current.risk] }}</span></p>
+    </section>
+    <section class="block">
+      <h2>Outcomes</h2>
+      <p>Days exposed: <strong>{{ report.outcomes.exposure_days }}</strong> ·
+         Exploited flaws found: <strong>{{ report.outcomes.exploited_flaws_found }}</strong> ·
+         Updates that succeeded: <strong>{{ report.outcomes.patches_succeeded }}</strong>
+         {% if report.outcomes.median_hours_to_patch is not none %}· Median time from alert to fix:
+         <strong>{{ report.outcomes.median_hours_to_patch }} hours</strong>{% endif %}</p>
     </section>
     <section class="block">
       <h2>Checks run</h2>
@@ -31,6 +40,6 @@
       {% endfor %}</ul>{% else %}<p>No changes were made this month.</p>{% endif %}
     </section>
   </div>
-  <footer>To keep a copy, use your browser's Print or Save as PDF.</footer>
+  <footer>{% if report.branding.footer %}{{ report.branding.footer }} · {% endif %}To keep a copy, use your browser's Print or Save as PDF.</footer>
 </div>
 {% endblock %}

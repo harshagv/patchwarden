@@ -1,0 +1,20 @@
+{% extends "dashboard/layout.html" %}
+{% block title %}List scan #{{ b.id }}{% endblock %}
+{% block page %}
+{% if b.state in ("queued", "running") %}<meta http-equiv="refresh" content="3">{% endif %}
+<div class="card">
+  <h1>List scan #{{ b.id }}</h1>
+  <p>{{ b.done }} of {{ b.total }} checked · <strong>{{ b.state }}</strong>{% if b.rejected %} · {{ b.rejected | length }} could not be scanned{% endif %}</p>
+  {% if b.scans %}
+  <table class="plain">
+    <tr><th>Site</th><th>PHP</th><th>Risk</th><th></th></tr>
+    {% for s in b.scans %}
+    <tr><td>{{ s.domain }}</td><td>{{ s.detected_version or "hidden" }}</td>
+      <td><span class="badge risk-{{ s.risk }}">{{ risk_labels[s.risk] }}</span></td>
+      <td>{% if s.detail != "full" %}<a href="/dashboard/sites">verify for full report</a>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  {% if b.rejected %}<p class="muted">Not scanned: {% for r in b.rejected %}{{ r.input }} ({{ r.message }}){% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+</div>
+{% endblock %}

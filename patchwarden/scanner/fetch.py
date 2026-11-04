@@ -207,6 +207,32 @@ class SafeFetcher:
         except httpx.HTTPError:
             raise FetchError("unreachable", "We could not connect to the site.") from None
 
+    async def post_json(self, url: str, body: bytes, headers: dict[str, str] | None = None) -> int:
+        """POST to a user-supplied URL (alert webhooks) with the same SSRF checks as a scan.
+
+        No redirects are followed: a webhook that redirects is treated as failed.
+        """
+        try:
+            async with asyncio.timeout(self.settings.scan_timeout_seconds):
+                target = self._parse(url)
+                if target.scheme != "https":
+                    raise BlockedTarget("blocked_scheme", "Alert webhooks must use https.")
+                host = target.host.rstrip(".").lower()
+                ip = await self._resolve_public(host, target.port or 443)
+                request = self._client.build_request(
+                    "POST", target.copy_with(host=ip), content=body,
+                    headers={"Host": host if target.port is None else f"{host}:{target.port}", **(headers or {})},
+                    extensions={"sni_hostname": host})
+                response = await self._client.send(request)
+                await response.aclose()
+                return response.status_code
+        except TimeoutError:
+            raise FetchError("timeout", "The webhook took too long to answer.") from None
+        except FetchError:
+            raise
+        except httpx.HTTPError:
+            raise FetchError("unreachable", "We could not reach the webhook.") from None
+
     async def _read_capped(self, response: httpx.Response) -> bytes:
         cap = self.settings.scan_max_body_bytes
         chunks: list[bytes] = []

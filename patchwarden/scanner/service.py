@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 
 import httpx
 from sqlalchemy import select
@@ -174,3 +174,38 @@ def store_scan(db: Session, outcome: ScanOutcome, *, user: User | None, wordpres
     db.add(AuditLog(user_id=owner_id, site_id=site.id, action="scan.created",
                     detail={"scan_id": scan.id, "risk": outcome.risk.value}))
     return scan
+
+
+BATCH_CHUNK = 25
+
+
+async def run_batch(factory, scanner: Scanner, batch_id: int, resume: bool = False) -> None:
+    """Scan a ScanBatch in chunks. Each chunk's scans and the progress counter commit together,
+    so an interrupted batch resumes exactly where it stopped, without duplicate scans."""
+    from ..models import ScanBatch
+
+    with factory() as db:
+        batch = db.get(ScanBatch, batch_id)
+        if batch is None or batch.state in ("done", "failed"):
+            return
+        owner = db.get(User, batch.owner_id)
+        batch.state = "running"
+        db.commit()
+        while batch.done < batch.total:
+            chunk = batch.targets[batch.done:batch.done + BATCH_CHUNK]
+            results = await scanner.scan_many(chunk, wordpress_requested=batch.wordpress)
+            rejected = list(batch.rejected)
+            for target, r in zip(chunk, results):
+                if isinstance(r, TargetRejected):
+                    rejected.append({"input": target[:200], "error": r.code, "message": r.message})
+                else:
+                    scan = store_scan(db, r, user=owner, wordpress_requested=batch.wordpress)
+                    scan.batch_id = batch.id
+            batch.rejected = rejected
+            batch.done += len(chunk)
+            db.commit()
+        batch.state = "done"
+        batch.finished_at = datetime.now(timezone.utc)
+        db.add(AuditLog(user_id=owner.id if owner else None, action="scan_batch.done",
+                        detail={"batch_id": batch.id, "total": batch.total, "rejected": len(batch.rejected)}))
+        db.commit()

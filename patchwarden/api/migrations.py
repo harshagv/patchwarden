@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
+from .. import access
 from ..deps import CurrentUser, DbDep
 from ..errors import AppError
 from ..migration import service
@@ -41,15 +42,17 @@ _REQUEST_DOCS = {
 
 def visible_migration(db: Session, mig_id: int, user: User) -> Migration:
     mig = db.get(Migration, mig_id)
-    if mig is None or (mig.site.owner_id != user.id and user.role != Role.admin):
+    if mig is None or not access.can(db, user, mig.site, "view"):
         raise AppError(404, "migration_not_found", "We could not find that migration.")
     return mig
 
 
 def schedule(request: Request, tasks: BackgroundTasks, mig: Migration, user: User, what: str) -> None:
-    st = request.app.state
-    fn = service.run_staging if what == "staging" else service.run_promotion
-    tasks.add_task(fn, st.sessionmaker, st.settings, st.vault, st.demo_world, st.scanner.fetcher, mig.id, user.id)
+    """Durable, like patches: recorded as a job, started now, resumed after a crash."""
+    queue = request.app.state.jobs
+    with request.app.state.sessionmaker() as db:
+        queued = queue.enqueue(db, "staging" if what == "staging" else "promotion", mig.id, user.id)
+    tasks.add_task(queue.run_one, queued.id)
 
 
 @router.post("", status_code=201, openapi_extra=_REQUEST_DOCS)
@@ -76,7 +79,8 @@ async def create_migration(request: Request, db: DbDep, user: CurrentUser) -> di
     site = owned_site(db, body.site_id, user)
     mig = await service.create_migration(db, site=site, user=user, to_version=body.to_version,
                                          vault=request.app.state.vault, world=request.app.state.demo_world,
-                                         uploaded=uploaded, from_version=from_version)
+                                         uploaded=uploaded, from_version=from_version,
+                                         sandbox=request.app.state.sandbox)
     return service.migration_json(mig)
 
 

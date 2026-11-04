@@ -35,6 +35,12 @@
 <li><a href="#move-sites-that-cannot-patch-phase-4-migration">Move sites that cannot patch (Phase 4: Migration)</a></li>
 <li><a href="#wordpress-guard-phase-5">WordPress Guard (Phase 5)</a></li>
 <li><a href="#demo-walkthrough-definition-of-done">Demo walkthrough (definition of done)</a></li>
+<li><a href="#trust-hardening-phase-a">Trust hardening (Phase A)</a></li>
+<li><a href="#scanner-funnel-phase-b">Scanner funnel (Phase B)</a></li>
+<li><a href="#watchdog-at-scale-phase-c">Watchdog at scale (Phase C)</a></li>
+<li><a href="#teams-billing-and-proof-phase-d">Teams, billing and proof (Phase D)</a></li>
+<li><a href="#virtual-patches-at-the-edge-phase-e">Virtual patches at the edge (Phase E)</a></li>
+<li><a href="#real-php-tooling-and-the-sbom-phase-f">Real PHP tooling and the SBOM (Phase F)</a></li>
 <li><a href="#where-this-differs-from-the-spec">Where this differs from the spec</a></li>
 <li><a href="#future-ideas">Future ideas</a></li>
 </ul>
@@ -691,6 +697,615 @@ plugin in a real WordPress (for example WordPress Playground) is listed under Fu
 3. <strong>Before/after report.</strong> "Before / after report for production" shows PHP 8.1.31 → 8.4.27, every check
    before and after, the backup, and who signed off.</p>
 <p><code>tests/test_migration_flow.py::test_custom_php81_site_passes_staging_first_time</code> and the Phase 4 acceptance tests cover the same path.</p>
+<h2 id="trust-hardening-phase-a">Trust hardening (Phase A)</h2>
+<p>These changes close the gaps where the trust promise was ahead of the code.</p>
+<h3 id="durable-jobs-and-crash-recovery">Durable jobs and crash recovery</h3>
+<p>Patch, rollback, staging and promotion runs are rows in the <code>jobs</code> table (<code>patchwarden/jobs.py</code>). An
+approval records the job and starts it straight away.</p>
+<ul>
+<li><strong>Claiming and leases.</strong> A worker claims a job with an atomic update that takes a lease
+  (<code>JOBS_LEASE_SECONDS</code>, default 60), and keeps the lease alive with heartbeats while the job runs.</li>
+<li><strong>A dead worker's job is picked up.</strong> If the process dies, the lease runs out. The in-app poller
+  (<code>JOBS_POLL_SECONDS</code>), or the next start-up, then claims the job again and runs it with <code>resume=True</code>.</li>
+<li><strong>Orphans at start-up.</strong> Any patch or migration left <code>running</code> without a live job gets a recovery job.</li>
+<li><strong>The resume rule.</strong> Before the first change to production, the runner records <code>"changing": true</code> in
+  the job's report. On resume:</li>
+<li><strong>Nothing had changed yet:</strong> the run starts again from the beginning.</li>
+<li><strong>Production had started to change:</strong> the outcome of the interrupted step is unknown, so the safe
+    move is taken. The verified backup and the old PHP version are restored, the site is re-checked,
+    and the report says <em>"rolled back automatically, after an interruption"</em>. A resumed rollback simply
+    runs the rollback again.</li>
+<li><strong>A promotion</strong> that was interrupted mid-change restores production the same way.</li>
+<li><strong>Retries and giving up.</strong> An unexpected error retries with backoff. After 5 attempts the job fails,
+  and the patch or migration is marked <em>"may need attention"</em>, so it never stays "running" forever.</li>
+<li><strong>Plugin actions.</strong> A resumed WordPress Guard job never queues plugin actions twice.</li>
+</ul>
+<h3 id="encrypted-backups-and-retention">Encrypted backups and retention</h3>
+<p>Hosts hand Patchwarden the backup archive plus the checksum they computed. <code>patchwarden/backups.py</code>
+then handles the rest:</p>
+<ul>
+<li><strong>Checksum check.</strong> The host's checksum is compared with the archive. A mismatch stops the patch with
+  nothing changed.</li>
+<li><strong>Encryption.</strong> The archive is encrypted with a fresh AES-256-GCM key, and that key is wrapped by the
+  backup key ring: <code>BACKUP_KEY</code>, or keys derived from <code>CREDENTIAL_KEY</code> with HKDF. The file header is
+  authenticated along with the content.</li>
+<li><strong>Storage.</strong> The file is written as <code>.pwbak</code> with <code>600</code> permissions.</li>
+<li><strong>Before relying on a backup.</strong> Patchwarden decrypts it, checks the SHA-256 again, and runs the host's
+  restore dry-run on the decrypted copy.</li>
+<li><strong>Damage is caught.</strong> Any change to the file fails decryption. A rollback from a damaged backup stops,
+  says so, and leaves the site alone.</li>
+<li><strong>Retention.</strong> Backups expire after <code>BACKUP_RETENTION_DAYS</code> (default 30). A daily job (and
+  <code>python -m patchwarden purge-backups</code>) deletes them and records <code>backup.purged</code>. A backup that an
+  in-progress change still needs is never deleted. After expiry, owner rollback is refused with
+  <code>backup_expired</code>.</li>
+</ul>
+<h3 id="rotating-keys">Rotating keys</h3>
+<p><code>CREDENTIAL_KEY</code> and <code>BACKUP_KEY</code> accept comma-separated keys: the first encrypts, and all of them decrypt.</p>
+<ol>
+<li>Put a new key first: <code>CREDENTIAL_KEY=new,old</code>. Restart the app.</li>
+<li>Run <code>python -m patchwarden rotate-credentials</code>. It re-encrypts stored hosting tokens and two-step
+   secrets with the new key.</li>
+<li>Remove the old key. Restart the app.</li>
+</ol>
+<h3 id="tamper-evident-audit-log">Tamper-evident audit log</h3>
+<p>Each <code>audit_log</code> entry stores <code>prev_hash</code> and
+<code>entry_hash = SHA-256(prev_hash + canonical JSON of the entry)</code>. The hash is computed in a
+SQLAlchemy <code>before_flush</code> hook, so no code path can skip it. On PostgreSQL, an advisory lock stops two
+processes from forking the chain.</p>
+<ul>
+<li><code>python -m patchwarden verify-audit</code> (exits 1 if broken), or <code>GET /api/admin/audit/verify</code> (admin
+  only), reports the first changed, deleted or reordered entry.</li>
+<li><code>python -m patchwarden export-audit --out audit.jsonl</code> writes the log as JSON lines, for copying to
+  write-once storage.</li>
+</ul>
+<h3 id="login-sessions-and-limits">Login, sessions and limits</h3>
+<ul>
+<li><strong>Two-step login (TOTP, RFC 6238).</strong> Turn it on with <code>POST /api/auth/mfa/setup</code>, then confirm with
+  <code>POST /api/auth/mfa/enable {"code"}</code>. That returns 10 single-use recovery codes, shown once.</li>
+<li>From then on, login needs a <code>code</code>. The API answers <code>401 mfa_required</code> without one, and the
+    dashboard asks for it.</li>
+<li>A code can't be replayed. Recovery codes work once.</li>
+<li>The secret is stored encrypted, and the recovery codes as hashes.</li>
+<li><code>POST /api/auth/mfa/disable {"code"}</code> turns it off.</li>
+<li><strong>Log out everywhere.</strong> <code>POST /api/auth/logout-all</code> invalidates every token issued so far, including
+  dashboard sessions.</li>
+<li><strong>Revocable report links.</strong> <code>POST /api/scans/{id}/share/revoke</code> makes every link issued so far stop
+  working. New links still work.</li>
+<li><strong>Rate limits.</strong></li>
+<li>Free scans: <code>SCAN_RATE_LIMIT</code> domains per <code>SCAN_RATE_WINDOW</code> per connection (default 30 a minute),
+    or <code>SCAN_RATE_LIMIT_USER</code> per account (300). A bulk list counts every domain.</li>
+<li>Failed logins: <code>LOGIN_FAILURE_LIMIT</code> per <code>LOGIN_FAILURE_WINDOW</code> (10 per 15 minutes), counted per
+    connection <em>and</em> per email.</li>
+<li>Answers are <code>429 rate_limited</code> with <code>Retry-After</code>.</li>
+<li><code>X-Forwarded-For</code> is honoured only from addresses listed in <code>TRUSTED_PROXIES</code>.</li>
+</ul>
+<h3 id="known-limits-of-phase-a">Known limits of Phase A</h3>
+<ul>
+<li>Rate limits are counted in each app process's memory. Several processes behind a load balancer each
+  keep their own counts; a shared store is listed under Future ideas.</li>
+<li>Keys come from environment variables. A cloud KMS key and backups in object storage with Object Lock
+  (write-once) are not built yet. The backup store is the single place to add them.</li>
+<li>Backups are kept by Patchwarden, encrypted. Keeping them on the customer's own hosting (storing only a
+  reference) needs the real panel adapters.</li>
+</ul>
+<h2 id="scanner-funnel-phase-b">Scanner funnel (Phase B)</h2>
+<h3 id="list-scans-run-in-the-background">List scans run in the background</h3>
+<p><code>POST /api/scans</code> with a list (JSON <code>domains</code> or a CSV upload) needs an account. It answers <strong>202</strong> with
+<code>status_url</code> (<code>GET /api/scan-batches/{id}</code>: progress, results and rejected rows), and you can close the page.</p>
+<ul>
+<li><strong>Size limit:</strong> up to <code>SCAN_BULK_MAX</code> domains (default 1,000) per list.</li>
+<li><strong>Durable:</strong> the list is a <code>bulk_scan</code> job on the same queue as patches.</li>
+<li><strong>Resumes without duplicates:</strong> domains are scanned in chunks of 25, and each chunk's scans commit
+  together with the progress counter. A crash resumes where it stopped, with nothing scanned twice.</li>
+<li><strong>Single domains</strong> are still free and immediate (<code>201</code>), with or without an account.</li>
+</ul>
+<h3 id="ownership-verification">Ownership verification</h3>
+<p><code>POST /api/sites/{id}/verification</code> returns a per-site, per-owner token and three ways to prove control:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>What to publish</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DNS</td>
+<td>TXT record <code>_patchwarden-challenge.&lt;domain&gt;</code> = <code>patchwarden-verification=&lt;token&gt;</code></td>
+</tr>
+<tr>
+<td>File</td>
+<td><code>https://&lt;domain&gt;/.well-known/patchwarden-verification.txt</code> containing the token (fetched with the SSRF-safe fetcher)</td>
+</tr>
+<tr>
+<td>Plugin</td>
+<td>The WordPress plugin's first report from the site's own address verifies it automatically</td>
+</tr>
+</tbody>
+</table>
+<p><code>POST /api/sites/{id}/verification/check</code> looks for the token and says in plain words what it found.</p>
+<ul>
+<li>Tokens are compared in constant time.</li>
+<li>Another owner's token never verifies your copy of the same domain.</li>
+<li><strong>Demo sites in <code>make dev</code>:</strong> the verify page has a <em>"publish the DNS record for me"</em> button that
+  writes the record into the fake DNS. It is shown only for <code>*.demo.patchwarden.test</code>.</li>
+</ul>
+<h3 id="who-sees-what">Who sees what</h3>
+<p>Every scan response carries <code>"detail": "basic"</code> or <code>"full"</code>.</p>
+<ul>
+<li><strong>Everyone</strong> sees the version, the risk, the summary, what to do, and the CVEs. The site shows those
+  to the world anyway.</li>
+<li><strong>Full detail</strong> (response headers, and which plugin or theme has which flaw) is shown to the
+  verified owner, to admins, and to anyone opening a share link that a verified owner sent.</li>
+<li><strong>Basic</strong> responses carry an <code>unlock</code> hint, and the WordPress section shows only counts
+  (<em>"3 plugins and themes, 2 known problems"</em>).</li>
+</ul>
+<h3 id="claiming-a-site">Claiming a site</h3>
+<p>The report page shows <strong>Claim this site</strong>. When the version is hidden, it shows <strong>See your real
+version</strong> instead.</p>
+<ol>
+<li><strong>Sign up.</strong> A visitor who isn't logged in goes to <code>/dashboard/signup</code>, which brings them back
+   afterwards. <code>next=</code> accepts only <code>/dashboard/...</code> paths, so it can never become an open redirect.</li>
+<li><strong>Claim.</strong> <code>POST /api/scans/{id}/claim</code> (it needs the share token for someone else's scan) adds the
+   domain to the user's sites, copies the report into its history, and starts verification. Claiming
+   twice returns the same site.</li>
+<li><strong>Rate limit.</strong> Sign-ups are limited to <code>SIGNUP_LIMIT</code> per hour per connection.</li>
+</ol>
+<h3 id="guided-hosting-connection">Guided hosting connection</h3>
+<ul>
+<li><strong>Setup page.</strong> <code>/dashboard/sites/{id}/connect</code> walks through creating a cPanel API token (Security →
+  Manage API Tokens, with an expiry date) or a Plesk API key, and points WordPress-only owners to the plugin.</li>
+<li><strong>Connection test.</strong> <em>Test the connection</em> (<code>POST /api/sites/{id}/test-connection</code>) is read-only: it
+  asks the host for the PHP version and the versions on offer, and changes nothing.</li>
+</ul>
+<h3 id="funnel-metrics">Funnel metrics</h3>
+<p><code>GET /api/admin/funnel?days=30</code> (admin only) counts each stage over the period, with the conversion
+ratio between each pair:</p>
+<p>free scans → accounts → claimed sites → verified sites → patch plans → approved → succeeded → active subscriptions</p>
+<h2 id="watchdog-at-scale-phase-c">Watchdog at scale (Phase C)</h2>
+<p>The Watchdog is the recurring product, so it has to stay cheap and quiet as the number of sites grows,
+and loud only when it matters.</p>
+<h3 id="cost-per-site">Cost per site</h3>
+<ul>
+<li><strong>Parallel version checks.</strong> The daily checks are fetched concurrently, at most <code>WATCHDOG_CONCURRENCY</code>
+  (default 20) at a time, then written in site order. Credentials are loaded before the parallel part, so
+  it does no database work.</li>
+<li><strong>Counters, not rows.</strong> Each check adds one to a per-site, per-day counter (<code>watch_counters</code>). A
+  <code>watch_checks</code> row is kept for each version check and only for CVE polls that found something. The
+  monthly report adds up the counters.</li>
+<li><strong>Match what changed.</strong> A feed poll matches only advisories that are new or whose affected versions
+  NVD revised. Each distinct PHP version is evaluated once per advisory, not once per site. When a site's
+  version changes, every stored advisory is matched against the new version.
+  <code>Watchdog.match_all()</code> still re-matches everything, for maintenance.</li>
+</ul>
+<h3 id="alert-priority">Alert priority</h3>
+<p>Each advisory is enriched with two exploitation signals:</p>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Source</th>
+<th>Stored as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Known exploited</td>
+<td>CISA KEV catalog</td>
+<td><code>advisories.kev</code>, <code>kev_added</code></td>
+</tr>
+<tr>
+<td>Likely to be exploited</td>
+<td>FIRST EPSS (probability in the next 30 days)</td>
+<td><code>advisories.epss</code></td>
+</tr>
+</tbody>
+</table>
+<p>An alert is <strong>urgent</strong> (email and channels at once) when the flaw is in KEV, its EPSS is at least
+<code>EPSS_URGENT</code> (default 0.1), or its severity is critical or high. Otherwise it is a <strong>digest</strong> alert:
+the daily digest job (08:00 UTC) sends one message per owner listing them.</p>
+<p><strong>Escalation.</strong> When a flaw already alerted on is added to KEV later, the owner gets a "now being
+exploited" message at once. The alert becomes urgent, and <code>alert.escalated</code> is written to the audit log.
+This happens once per alert.</p>
+<p>In fixture mode, KEV and EPSS are read from the <code>kev</code> and <code>epss</code> keys of the fixture file.</p>
+<h3 id="alert-channels">Alert channels</h3>
+<p>Besides email, an owner can add Slack, Microsoft Teams or generic webhooks.</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/channels</code></td>
+<td>List (kind, host, enabled; never the URL)</td>
+</tr>
+<tr>
+<td><code>POST /api/channels</code> <code>{"kind","url"}</code></td>
+<td>Add one (201). A webhook returns <code>signing_secret</code> once</td>
+</tr>
+<tr>
+<td><code>POST /api/channels/{id}/test</code></td>
+<td>Send a test message to that channel only</td>
+</tr>
+<tr>
+<td><code>DELETE /api/channels/{id}</code></td>
+<td>Remove</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Slack URLs must be on <code>hooks.slack.com</code>. Teams URLs must be on <code>*.webhook.office.com</code> or
+  <code>*.logic.azure.com</code>. Every URL must be https with no user or password in it.</li>
+<li>A webhook URL is a credential, so it is stored Fernet-encrypted. Only its host is shown back.</li>
+<li>Delivery uses the same SSRF guard as scans: public addresses only, connection pinned to the checked
+  address, no redirects. A webhook pointing inside the network fails with <code>blocked_private</code>.</li>
+<li>Generic webhooks receive <code>{"event","data","text"}</code> with these headers:</li>
+<li><code>X-Patchwarden-Timestamp</code></li>
+<li><code>X-Patchwarden-Signature: sha256=&lt;HMAC-SHA256(secret, "&lt;timestamp&gt;.&lt;body&gt;")&gt;</code></li>
+</ul>
+<p>Receivers should check the signature, and reject timestamps older than a few minutes.
+- Each alert records the per-channel delivery result in <code>alerts.delivered</code>.</p>
+<h3 id="dunning">Dunning</h3>
+<p>When a subscription goes <code>past_due</code>, <code>past_due_since</code> is recorded. The daily dunning job (09:00 UTC)
+emails the owner on day 1, day 7 and the day before the grace period ends (<code>DUNNING_GRACE_DAYS</code>,
+default 14). Monitoring continues during the grace period.</p>
+<p>After the grace period, the subscription is cancelled, <code>subscription.lapsed</code> is written to the audit
+log, and the owner is told that monitoring stopped. Setting the status back to <code>active</code> clears the clock.
+No payment is taken here: the status field is still set by billing (or an admin).</p>
+<h2 id="teams-billing-and-proof-phase-d">Teams, billing and proof (Phase D)</h2>
+<h3 id="teams-and-roles">Teams and roles</h3>
+<p>An organisation (a "team": an agency and its clients, or a company's IT) shares sites between people.
+The site's owner keeps every right; team members get what their role allows. Every access decision goes
+through one helper, <code>patchwarden/access.py</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th style="text-align: center;">owner</th>
+<th style="text-align: center;">admin</th>
+<th style="text-align: center;">member</th>
+<th style="text-align: center;">approver</th>
+<th style="text-align: center;">viewer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>See the site, reports, alerts</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td>Plan patches, connect hosts, monitoring, staging</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td>Approve, roll back, sign off, promote, accept quotes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td>Members, branding, rates</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>A platform administrator (<code>users.role = admin</code>) can look at every site but never plans or approves.</li>
+<li><strong>Four-eyes rule.</strong> With <code>require_separate_approver</code> on, the person who planned a change cannot
+  approve it (<code>separate_approver_required</code>).</li>
+<li>A team always keeps at least one owner (<code>last_owner</code>). Only the site's owner can put a site in a team,
+  and only into a team they manage.</li>
+<li>Members must already have an account; there are no invitation emails in this build.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/orgs</code> <code>{"name"}</code></td>
+<td>Create a team; you become its owner</td>
+</tr>
+<tr>
+<td><code>GET /api/orgs</code>, <code>GET /api/orgs/{id}</code></td>
+<td>Your teams, members, sites and your role</td>
+</tr>
+<tr>
+<td><code>PATCH /api/orgs/{id}</code></td>
+<td>Name, four-eyes rule, hourly rate, branding</td>
+</tr>
+<tr>
+<td><code>POST /api/orgs/{id}/members</code> <code>{"email","role"}</code></td>
+<td>Add a member, or change their role</td>
+</tr>
+<tr>
+<td><code>DELETE /api/orgs/{id}/members/{user_id}</code></td>
+<td>Remove a member</td>
+</tr>
+<tr>
+<td><code>POST /api/sites/{id}/team</code> <code>{"org_id"}</code></td>
+<td>Share a site with a team (<code>null</code> stops sharing)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="entitlements-and-the-billing-export">Entitlements and the billing export</h3>
+<p>No payment is taken. Patchwarden records what is owed, and a payment system or an accountant collects it.</p>
+<ul>
+<li>When a patch is approved, its <code>billing</code> is fixed on the job:</li>
+<li><code>included</code> if the site has an active Watchdog or WordPress Guard subscription;</li>
+<li>otherwise <code>patch_fee</code> at <code>PRICE_PATCH</code>.</li>
+</ul>
+<p>A later price change never rewrites history. Migration promotions are covered by the migration quote.
+- <code>GET /api/admin/billing?month=2026-10[&amp;format=csv]</code> (admin only) lists every item in the month:
+  - subscriptions that are not cancelled (<code>PRICE_WATCHDOG</code>, <code>PRICE_WP_GUARD</code>);
+  - patch fees, and included patches at 0;
+  - accepted migration quotes;
+  - active virtual patches (Phase E).</p>
+<p>In the CSV, a cell that starts with <code>= + - @</code> is prefixed with <code>'</code>, so a spreadsheet does not run it as
+  a formula.</p>
+<h3 id="outcome-based-monthly-report">Outcome-based monthly report</h3>
+<p>The monthly report (<code>outcomes</code>) now says what the service achieved, not only what it did:</p>
+<ul>
+<li>days the site was exposed;</li>
+<li>exploited (KEV) flaws found;</li>
+<li>updates that succeeded;</li>
+<li>risks fixed, and the median hours from alert to fix.</li>
+</ul>
+<p>The summary sentence and the report page include them.</p>
+<h3 id="signed-attestations">Signed attestations</h3>
+<p>A verified site whose latest check (at most two days old) found a patched PHP version can get a signed
+statement. It can go on a site footer, or to a customer, insurer or auditor.</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Who</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/sites/{id}/attestations</code></td>
+<td>edit role</td>
+<td>Issue one (201), valid for <code>ATTESTATION_DAYS</code></td>
+</tr>
+<tr>
+<td><code>GET /api/attestations/{id}</code></td>
+<td>anyone</td>
+<td>Payload, signature, <code>status</code> (valid, expired, revoked, invalid)</td>
+</tr>
+<tr>
+<td><code>GET /api/attestations/{id}/badge.svg</code></td>
+<td>anyone</td>
+<td>A badge for the site</td>
+</tr>
+<tr>
+<td><code>POST /api/attestations/{id}/revoke</code></td>
+<td>edit role</td>
+<td>Revoke</td>
+</tr>
+<tr>
+<td><code>GET /.well-known/patchwarden-attestation-keys.json</code></td>
+<td>anyone</td>
+<td>The public key as a JWK (OKP / Ed25519)</td>
+</tr>
+</tbody>
+</table>
+<p>The signature is Ed25519 over the payload as canonical JSON: sorted keys, no spaces, UTF-8. It is
+base64url-encoded without padding, so anyone can check it offline. Set <code>ATTESTATION_KEY</code> (a base64url
+32-byte seed) in production. Without it, the key is derived from <code>CREDENTIAL_KEY</code>, and rotating that key
+would make older statements fail to verify.</p>
+<h3 id="instant-migration-quotes">Instant migration quotes</h3>
+<p><code>GET /api/migrations/{id}/quote</code> turns the breakage scan into a fixed price:</p>
+<ul>
+<li>4 h base (staging, test run, sign-off walkthrough, promotion);</li>
+<li>1.5 h per manual error fix and 0.5 h per manual deprecation fix;</li>
+<li>0.5 h per hand-edited file and 0.1 h per automatic fix.</li>
+</ul>
+<p>Hours are rounded up to the half hour. The rate is the team's <code>hourly_rate</code>, otherwise
+<code>MIGRATION_HOURLY_RATE</code>. The quote carries a plain-language statement of work (scope, method, exclusions,
+done-when, price) and is valid for 30 days. It is made once and kept as offered.
+<code>POST /api/migrations/{id}/quote/accept</code> (approve role) records the acceptance, which then appears in the
+billing export.</p>
+<h3 id="white-label">White-label</h3>
+<p>A team's <code>brand_name</code>, <code>brand_color</code>, <code>brand_logo_url</code> (https only) and <code>brand_footer</code> replace
+Patchwarden's on its sites' alert emails, channel messages, monthly report emails and the report page.
+To show the logo, the dashboard's Content-Security-Policy allows <code>img-src https:</code>, and the logo is loaded
+with <code>referrerpolicy="no-referrer"</code>.</p>
+<h2 id="virtual-patches-at-the-edge-phase-e">Virtual patches at the edge (Phase E)</h2>
+<p>Some sites cannot be updated today, for example during a change freeze or while a migration is
+planned. A virtual patch is a WAF rule in front of the site that blocks attack-shaped requests before
+they reach PHP. It buys time; it does not replace the PHP update.</p>
+<h3 id="what-it-blocks">What it blocks</h3>
+<p><code>patchwarden/virtual_patch/signatures.py</code> lists generic PHP code-injection shapes. Each is matched
+after URL-decoding and lower-casing:</p>
+<ul>
+<li>ini overrides from the URL (<code>allow_url_include</code>, <code>auto_prepend_file</code>);</li>
+<li>stream wrappers (<code>php://input</code>, <code>php://filter</code>, <code>data://</code>);</li>
+<li><code>&lt;?php</code> in the query;</li>
+<li>direct <code>php-cgi</code> requests.</li>
+</ul>
+<p>They are not PHP2Shell's exact exploit, which is not public here. When a vendor or CERT publishes a
+precise signature, replace the list: every provider builds its rule from it.</p>
+<h3 id="providers">Providers</h3>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Where the rule goes</th>
+<th>Credential (<code>secret</code>, encrypted)</th>
+<th><code>config</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cloudflare</td>
+<td>Rulesets API, zone custom rules (<code>http_request_firewall_custom</code>), action block</td>
+<td>API token with <em>Zone WAF: Edit</em> on that zone</td>
+<td><code>zone_id</code></td>
+</tr>
+<tr>
+<td>Akamai</td>
+<td>App &amp; API Protector custom rule, attached to a security policy with action <code>deny</code>, then the config version is activated</td>
+<td>EdgeGrid JSON: <code>host</code>, <code>client_token</code>, <code>client_secret</code>, <code>access_token</code></td>
+<td><code>config_id</code>, <code>version</code>, <code>policy_id</code>, <code>network</code> (STAGING or PRODUCTION)</td>
+</tr>
+<tr>
+<td>AWS WAF</td>
+<td>Existing WAFv2 web ACL: AWS managed <code>AWSManagedRulesPHPRuleSet</code> plus a custom OR-of-byte-match block rule</td>
+<td>Optional JSON <code>aws_access_key_id</code>, <code>aws_secret_access_key</code> (otherwise the server's IAM role)</td>
+<td><code>web_acl_name</code>, <code>web_acl_id</code>, <code>region</code>, <code>scope</code> (REGIONAL or CLOUDFRONT)</td>
+</tr>
+<tr>
+<td>demo</td>
+<td>A fake edge in the demo world, for <code>*.demo.patchwarden.test</code> only</td>
+<td>none</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p>How each provider is tested:</p>
+<ul>
+<li><strong>Akamai</strong> is <strong>not verified against a live account</strong>. The field names follow Akamai's public API
+  reference. The tests check the request flow and the EdgeGrid signature (against an independent
+  reference implementation), not Akamai's acceptance of the rule. The EdgeGrid host must be an
+  <code>*.luna.akamaiapis.net</code> address.</li>
+<li><strong>AWS WAF</strong> is tested with botocore's Stubber, which validates every request against the WAFv2 API
+  model. AWS Shield Advanced includes AWS WAF, so this is also the Shield answer: Shield itself handles
+  DDoS, and the application-layer block is a WAF rule.</li>
+<li><strong>Cloudflare</strong> is tested against a mocked Rulesets API.</li>
+</ul>
+<h3 id="flow-and-safety">Flow and safety</h3>
+<p>Endpoints:</p>
+<ul>
+<li><code>POST /api/sites/{id}/virtual-patches</code> <code>{"provider","config","secret"}</code> (edit role) is the <strong>dry run</strong>.
+  It checks the settings and returns the rules it would add. Nothing is sent to the provider.</li>
+<li><code>POST /api/virtual-patches/{id}/approve</code> (approve role, four-eyes rule respected) records a durable job
+  (<code>vpatch_apply</code>) that adds the rule.</li>
+<li><code>POST /api/virtual-patches/{id}/remove</code> (approve role) records <code>vpatch_remove</code>.</li>
+<li><code>GET /api/virtual-patches/{id}</code> and <code>GET /api/sites/{id}/virtual-patches</code> show the state and report.</li>
+</ul>
+<p>States: <code>planned → applying → active → removing → removed</code>, or <code>failed</code>.</p>
+<p>Safety rules:</p>
+<ul>
+<li>Apply and remove are safe to repeat: the rule is tagged <code>patchwarden-vp-&lt;id&gt;</code>, and an existing tagged
+  rule is reused. A crashed job simply runs again, and start-up gives orphaned <code>applying</code> or <code>removing</code>
+  patches a recovery job.</li>
+<li>Removal deletes only the tagged rule. The customer's own rules are untouched.</li>
+<li>Errors are handled by kind:</li>
+<li>A refused credential or a wrong id fails at once, with a plain message.</li>
+<li>An unreachable provider, or an AWS <code>WAFOptimisticLockException</code>, is retried by the job queue with
+    backoff. After the queue gives up, the patch is marked failed.</li>
+<li>The provider secret is Fernet-encrypted, never returned (<code>has_secret</code> only), and never logged or
+  audited.</li>
+<li>An active virtual patch is billed per month at <code>PRICE_VIRTUAL_PATCH</code> (default 19) in the billing export.</li>
+</ul>
+<h2 id="real-php-tooling-and-the-sbom-phase-f">Real PHP tooling and the SBOM (Phase F)</h2>
+<h3 id="rector-phpstan-and-php-l-in-a-sandbox">Rector, PHPStan and <code>php -l</code> in a sandbox</h3>
+<p>The built-in breakage scan is fast and explainable, and it is always on. When <code>MIGRATION_TOOLS</code> is
+set, a migration plan also runs real tools over the site's code, for the target PHP version:</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>What it adds to the plan</th>
+<th>How it runs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>php -l</code></td>
+<td>Files that do not parse (step <code>tool:php-lint</code>)</td>
+<td>200 files per run</td>
+</tr>
+<tr>
+<td>PHPStan (level 0, <code>phpVersion</code> = target)</td>
+<td>Calls and constants the new version lacks (step <code>tool:phpstan</code>)</td>
+<td><code>analyse --error-format=json</code></td>
+</tr>
+<tr>
+<td>Rector (<code>withPhpSets(phpXY)</code>)</td>
+<td>The upgrade changes it proposes, as diffs (step <code>tool:rector</code>)</td>
+<td><code>process --dry-run --output-format=json</code></td>
+</tr>
+</tbody>
+</table>
+<p>Results are stored in <code>breakage.tools</code>. Their steps are added to <code>plan.fixes</code>, and the instant quote
+counts them. A missing or failing tool is reported (<code>unavailable</code>, <code>failed</code>, <code>timed_out</code>) and never
+blocks the plan. The tools only get the code files and their own config, never <code>composer.lock</code> or other
+files.</p>
+<p><strong>Settings:</strong></p>
+<ul>
+<li><code>MIGRATION_TOOLS=off</code> (default)</li>
+<li><code>MIGRATION_TOOLS=docker</code>: production.</li>
+<li><code>MIGRATION_TOOLS=local</code>: development only, refused when <code>APP_ENV=production</code>.</li>
+</ul>
+<p><strong>The Docker sandbox</strong> runs each tool with:</p>
+<ul>
+<li><code>--network none</code></li>
+<li><code>--read-only</code></li>
+<li><code>--cap-drop ALL</code></li>
+<li><code>--security-opt no-new-privileges</code></li>
+<li><code>--user 65534:65534</code></li>
+<li>PID, memory and CPU limits</li>
+<li>a small <code>noexec</code> <code>/tmp</code></li>
+<li>the code mounted read-only at <code>/app</code></li>
+<li>a timeout (<code>SANDBOX_TIMEOUT</code>, 300 s)</li>
+</ul>
+<p>Commands are argument lists, never a shell string. Code paths with <code>..</code>, an absolute path or a leading
+<code>-</code> are refused.</p>
+<p><strong>The image:</strong> build it yourself; nothing is pulled at run time. It is multi-arch, so it builds on arm64.</p>
+<pre><code class="language-bash">docker build -t patchwarden/php-tools:1 docker/php-tools
+</code></pre>
+<p><strong>The local sandbox</strong> runs the locally installed <code>php</code>, <code>rector</code> and <code>phpstan</code> in a temporary folder,
+with a clean environment, CPU and file-size limits and the same timeout. It has no network isolation,
+which is why it is refused in production.</p>
+<p><strong>What the tests cover:</strong></p>
+<ul>
+<li>Parsing of real tool output formats.</li>
+<li>The Docker flags.</li>
+<li>The production refusal.</li>
+<li>A real <code>php -l</code> run through the local sandbox.</li>
+<li>The plan and quote integration.</li>
+</ul>
+<p>A test that runs real Rector and PHPStan is skipped unless both are installed.</p>
+<h3 id="per-site-sbom-cyclonedx-15">Per-site SBOM (CycloneDX 1.5)</h3>
+<p><code>GET /api/sites/{id}/sbom</code> (view role, <strong>verified sites only</strong>, because an inventory shows an attacker
+exactly what to aim at) returns <code>application/vnd.cyclonedx+json</code> with:</p>
+<ul>
+<li><strong>PHP</strong>: the latest detected version, with its CPE (<code>cpe:2.3:a:php:php:&lt;v&gt;</code>).</li>
+<li><strong>WordPress core, plugins and themes</strong>: from the freshest evidence (a plugin report, else the outside
+  scan).</li>
+<li><strong>Composer packages</strong>: from <code>composer.lock</code>, read from the host (read-only) when hosting access is set
+  up. <code>packages-dev</code> get <code>scope: optional</code>.</li>
+<li><strong>Vulnerabilities</strong>:</li>
+<li>PHP advisories the Watchdog matched, with the CVSS rating, <code>patchwarden:kev</code> and <code>patchwarden:epss</code>;</li>
+<li>WordPress component flaws from the feed.</li>
+</ul>
+<p>Each points at the component it affects.</p>
+<p>Package URLs: <code>pkg:composer/...</code> is the standard type. PHP, WordPress core, plugins and themes have no
+purl type of their own, so they use <code>pkg:generic</code> with a clear namespace. Each export is recorded in the
+audit log (<code>site.sbom_exported</code>).</p>
 <h2 id="where-this-differs-from-the-spec">Where this differs from the spec</h2>
 <ul>
 <li><code>.env.example</code> leaves <code>DATABASE_URL</code> empty, so local dev uses SQLite. The spec's PostgreSQL URL is shown as a
@@ -713,8 +1328,7 @@ plugin in a real WordPress (for example WordPress Playground) is listed under Fu
   added. This is so it can be shown exactly once and stored only as a hash. The spec's credential kind
   <code>api_key</code> (Fernet, Phase 2) stays for keys that Patchwarden sends <em>to</em> an agent.</li>
 <li>Phase 5 adds <code>plugin_keys</code> and <code>plugin_actions</code> tables.</li>
-<li>Sign-off is by the site owner's account ("owner/IT": IT signs off on the owner's account). Separate IT
-  accounts with sign-off rights would need agency/team accounts, which are out of scope (no multi-tenancy in this build).</li>
+<li>Sign-off can be given by the site owner or, since Phase D, by a team member with the approver role.</li>
 <li>Endpoints added beyond the minimum set: <code>PATCH /api/sites/{id}</code>, <code>POST</code>/<code>DELETE /api/sites/{id}/credentials</code>.</li>
 <li><code>patch_jobs.state</code> <code>awaiting_approval</code> is in the model but unused so far. A new job is <code>dry_run</code> and is
   approved from there. Phase 5's "Fix it" button is expected to create jobs in <code>awaiting_approval</code>.</li>
@@ -726,24 +1340,27 @@ plugin in a real WordPress (for example WordPress Playground) is listed under Fu
 <h2 id="future-ideas">Future ideas</h2>
 <p>These are not in the spec, so they are not built:</p>
 <ul>
-<li>Backup retention and clean-up rules.</li>
+<li>A shared rate-limit store (for example Redis) when running several app processes.</li>
+<li>
+<p>Keys in a cloud KMS, and backups in object storage with Object Lock (write-once).</p>
+</li>
+<li>
+<p>Quiet hours and SMS alerts.</p>
+</li>
+<li>Invitation emails for team members who do not have an account yet.</li>
 <li>Running the plugin's tests inside a real WordPress (WordPress Playground via npx, or the official Docker image).</li>
 <li>Publishing the plugin on WordPress.org, and checking it with the WordPress Coding Standards (PHPCS) in CI.</li>
 <li>Deleting the staging site after a promotion, and a staging site's own expiry.</li>
 <li>Uploading a developer's fixed files to staging through Patchwarden (today the developer edits staging directly).</li>
-<li>A PHP tokenizer-based scan (via <code>php -l</code> / a PHP AST in a sandbox) for runtime-only changes.</li>
+<li>Applying Rector's diffs on staging automatically (today a developer reviews and applies them).</li>
 <li>A single scheduler across several app processes (a database lock or a dedicated worker).</li>
-<li>Per-owner alert preferences (email digest, quiet hours) and other channels (SMS, Slack).</li>
 <li>
 <p>A "dry run again" button when a dry run goes stale (today you plan a new one).</p>
 </li>
 <li>
-<p>Rate limiting for the free scan endpoint and login (per IP and per account).</p>
+<p>Reading plugin versions from <code>readme.txt</code>, for more exact WordPress matching.</p>
 </li>
-<li>Background (scheduled) bulk scans for very large CSVs. Today up to 100 domains are scanned in the request.</li>
-<li>Reading plugin versions from <code>readme.txt</code>, for more exact WordPress matching.</li>
 <li>Alembic migrations instead of <code>create_all</code> at startup.</li>
-<li>A public "free scan" landing page.</li>
 </ul></article>
 </main>
 <footer class="footer footer--slim">

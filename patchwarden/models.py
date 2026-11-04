@@ -116,6 +116,13 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(100))
     role: Mapped[Role] = mapped_column(_enum(Role), default=Role.owner)
+    # Bumped by "log out everywhere": every token issued before it stops working.
+    token_version: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    # TOTP second factor. The secret is Fernet-encrypted; recovery codes are stored as SHA-256 hashes.
+    mfa_secret: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    mfa_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    mfa_last_step: Mapped[int | None] = mapped_column(Integer, nullable=True)  # stops a code being replayed
+    mfa_recovery: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
     sites: Mapped[list[Site]] = relationship(back_populates="owner")
@@ -136,6 +143,13 @@ class Site(Base):
     # after a change, e.g. {"login": "/wp-login.php", "form": "/checkout"}.
     check_paths: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    # Proof that this owner controls the domain (DNS TXT record, a file in /.well-known/, or the plugin).
+    verify_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    verify_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Shared with a team (agency or company): members get access by their role in the organisation.
+    org_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True,
+                                               index=True)
 
     owner: Mapped[User | None] = relationship(back_populates="sites")
     scans: Mapped[list[Scan]] = relationship(back_populates="site", order_by="Scan.id")
@@ -155,12 +169,17 @@ class Scan(Base):
     # behind the score (version source, WordPress findings, fetch errors).
     scanned_url: Mapped[str] = mapped_column(String(2048))
     findings: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Share links issued before this moment stop working.
+    share_revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("scan_batches.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
 
     site: Mapped[Site] = relationship(back_populates="scans")
 
 
 class AuditLog(Base):
+    """Append-only, hash-chained: each entry stores the hash of the one before it (see audit_chain.py)."""
+
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -169,6 +188,8 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(64))
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    prev_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entry_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
 
 class Credential(Base):
@@ -194,9 +215,13 @@ class Backup(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     location: Mapped[str] = mapped_column(String(1024))
-    checksum: Mapped[str] = mapped_column(String(128))
+    checksum: Mapped[str] = mapped_column(String(128))  # SHA-256 of the archive before encryption
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    encrypted: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class PatchJob(Base):
@@ -212,6 +237,9 @@ class PatchJob(Base):
     approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     report: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    # Who planned it (a separate-approval policy needs a different approver), and how it is billed.
+    requested_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    billing: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     site: Mapped[Site] = relationship()
     backup: Mapped[Backup | None] = relationship()
@@ -228,6 +256,8 @@ class Subscription(Base):
     product: Mapped[Product] = mapped_column(_enum(Product))
     status: Mapped[SubscriptionStatus] = mapped_column(_enum(SubscriptionStatus), default=SubscriptionStatus.active)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    past_due_since: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    reminders_sent: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
 
     site: Mapped[Site] = relationship()
 
@@ -244,6 +274,11 @@ class Alert(Base):
     message: Mapped[str] = mapped_column(String(4000))
     sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # null until an email went out
     read: Mapped[bool] = mapped_column(Boolean, default=False)
+    # "urgent" goes out at once (exploited, likely to be exploited, or critical/high); "digest" waits for the daily digest.
+    priority: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    digest_sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    escalated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)  # became exploited later
+    delivered: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # channel -> outcome
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
 
     site: Mapped[Site] = relationship()
@@ -274,6 +309,10 @@ class Advisory(Base):
     severity: Mapped[str] = mapped_column(String(16))
     score: Mapped[float | None] = mapped_column(nullable=True)
     summary: Mapped[str] = mapped_column(String(4000))
+    kev: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)  # in CISA's exploited list
+    kev_added: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    epss: Mapped[float | None] = mapped_column(nullable=True)  # FIRST EPSS: chance of exploitation in 30 days
+    updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     affected: Mapped[list] = mapped_column(JSON, default=list)  # version ranges
     fixed_in: Mapped[str | None] = mapped_column(String(64))
     url: Mapped[str | None] = mapped_column(String(512))
@@ -306,6 +345,10 @@ class Migration(Base):
     promotion: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     patch_job_id: Mapped[int | None] = mapped_column(ForeignKey("patch_jobs.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    # The fixed-price quote (hours, rate, statement of work) and when the customer accepted it.
+    quote: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    quote_accepted_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    quote_accepted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     site: Mapped[Site] = relationship()
 
@@ -343,3 +386,148 @@ class PluginAction(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
     sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
+class Job(Base):
+    """A durable unit of background work (patch, rollback, staging, promotion).
+
+    A worker claims a job by taking a lease and keeps it alive with heartbeats. If the process dies,
+    the lease runs out and any worker (or the next start-up) claims the job again and resumes it.
+    """
+
+    __tablename__ = "jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    ref_id: Mapped[int] = mapped_column(Integer, index=True)  # the patch job or migration it drives
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    state: Mapped[str] = mapped_column(String(16), default="queued", index=True)  # queued, running, done, failed
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=5)
+    lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+
+class ScanBatch(Base):
+    """A list of domains scanned in the background (a CSV upload, or a JSON list)."""
+
+    __tablename__ = "scan_batches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    targets: Mapped[list] = mapped_column(JSON, default=list)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    done: Mapped[int] = mapped_column(Integer, default=0)  # targets processed (scanned or rejected)
+    rejected: Mapped[list] = mapped_column(JSON, default=list)
+    wordpress: Mapped[bool] = mapped_column(Boolean, default=False)
+    state: Mapped[str] = mapped_column(String(16), default="queued")  # queued, running, done, failed
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+
+class WatchCounter(Base):
+    """Per site, per day: how many checks ran. Replaces one row per site per hourly poll."""
+
+    __tablename__ = "watch_counters"
+    __table_args__ = (UniqueConstraint("site_id", "day", name="uq_watch_counter_site_day"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
+    day: Mapped[str] = mapped_column(String(10))  # YYYY-MM-DD (UTC)
+    version_checks: Mapped[int] = mapped_column(Integer, default=0)
+    cve_checks: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class NotificationChannel(Base):
+    """Where a user's alerts go besides email. The URL is a secret (it posts into their workspace): encrypted."""
+
+    __tablename__ = "notification_channels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # slack, teams, webhook
+    url_encrypted: Mapped[bytes] = mapped_column(LargeBinary)
+    url_hint: Mapped[str] = mapped_column(String(128))  # host only, for display
+    secret_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)  # webhook HMAC key
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class OrgRole(str, enum.Enum):
+    owner = "owner"        # everything, including members and billing
+    admin = "admin"        # everything except removing the last owner
+    member = "member"      # plans changes, connects hosts; cannot approve
+    approver = "approver"  # approves and signs off; cannot plan
+    viewer = "viewer"      # reads reports and alerts
+
+
+class Organization(Base):
+    """A team (an agency and its clients, or a company's IT). Also carries its white-label branding."""
+
+    __tablename__ = "organizations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    # Four-eyes rule: the person who planned a change cannot also approve it.
+    require_separate_approver: Mapped[bool] = mapped_column(Boolean, default=False)
+    brand_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    brand_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    brand_logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    brand_footer: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    hourly_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)  # migration quotes, whole currency units
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class Membership(Base):
+    __tablename__ = "memberships"
+    __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_membership"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[OrgRole] = mapped_column(_enum(OrgRole))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class Attestation(Base):
+    """A signed, public statement that a site was patched and checked at a point in time."""
+
+    __tablename__ = "attestations"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # random, used in public links
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    signature: Mapped[str] = mapped_column(String(128))  # base64url Ed25519 signature over the canonical payload
+    key_id: Mapped[str] = mapped_column(String(32))
+    issued_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+
+class VirtualPatch(Base):
+    """A WAF rule at the site's edge that blocks attack requests until PHP itself is updated."""
+
+    __tablename__ = "virtual_patches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(16))  # cloudflare, akamai, aws_waf, demo
+    config: Mapped[dict] = mapped_column(JSON, default=dict)  # zone / web ACL / security config ids (not secret)
+    secret_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)  # API token, Fernet
+    # planned -> applying -> active -> removing -> removed; failed from applying or removing
+    state: Mapped[str] = mapped_column(String(16), default="planned", index=True)
+    plan: Mapped[dict] = mapped_column(JSON, default=dict)
+    remote_ref: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    report: Mapped[dict] = mapped_column(JSON, default=dict)
+    requested_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    activated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    removed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+    site: Mapped[Site] = relationship()

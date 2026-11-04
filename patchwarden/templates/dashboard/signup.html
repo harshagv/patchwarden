@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Create your Patchwarden account{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Create your free account</h1>
+  <p class="muted">Free scans, your full reports, and a daily check of the sites you claim. No card needed.</p>
+  {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/dashboard/signup" class="grid">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>Email<br><input name="email" type="email" autocomplete="username" value="{{ email or '' }}" required></label>
+    <label>Password (at least 12 characters)<br><input name="password" type="password" autocomplete="new-password" minlength="12" required></label>
+    <p><button type="submit">Create account</button></p>
+  </form>
+  <p class="muted">Already have an account? <a href="/dashboard/login?next={{ next | urlencode }}">Log in</a>.</p>
+</div>
+{% endblock %}

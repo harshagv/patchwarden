@@ -1,0 +1,14 @@
+{% extends "dashboard/layout.html" %}
+{% block title %}Claim {{ scan.site.domain }}{% endblock %}
+{% block page %}
+<div class="card">
+  <h1>Claim {{ scan.site.domain }}</h1>
+  <p>We will add <strong>{{ scan.site.domain }}</strong> to your sites, with this report in its history.
+     Then you prove it is yours (a DNS record or a small file, about two minutes), and the full report opens up.</p>
+  <form method="post" action="/dashboard/claim/{{ scan.id }}" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <button type="submit">Add it to my sites</button>
+  </form>
+</div>
+{% endblock %}

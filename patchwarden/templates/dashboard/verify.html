@@ -1,0 +1,37 @@
+{% extends "dashboard/layout.html" %}
+{% block title %}Verify {{ site.domain }}{% endblock %}
+{% block page %}
+<div class="card">
+  <h1>Prove {{ site.domain }} is yours</h1>
+  {% if result %}<p class="{{ 'ok' if result.verified else 'alert' }}">{{ result.message }}</p>{% endif %}
+  {% if site.verified_at %}
+    <p class="ok">Verified ({{ site.verify_method }}) on {{ site.verified_at.strftime("%b %-d, %Y") }}. The full report is open to you.</p>
+    <p><a href="/dashboard/sites#site-{{ site.id }}">Back to your sites</a></p>
+  {% else %}
+    <p>Do <strong>one</strong> of these, then press "Check now".</p>
+    <section class="block">
+      <h2>Option 1: a DNS record</h2>
+      <p>At your domain's DNS provider, add a <strong>TXT</strong> record:</p>
+      <table class="plain"><tr><th>Name</th><td><code>{{ v.dns.name }}</code></td></tr>
+        <tr><th>Value</th><td><code>{{ v.dns.value }}</code></td></tr></table>
+    </section>
+    <section class="block">
+      <h2>Option 2: a small file</h2>
+      <p>Put a file at <code>{{ v.file.url }}</code> containing only:</p>
+      <p><code>{{ v.file.contents }}</code></p>
+    </section>
+    <section class="block">
+      <h2>Option 3: WordPress</h2>
+      <p>Connect the Patchwarden plugin: it proves the site is yours automatically. <a href="/dashboard/wp-guard/{{ site.id }}">Set up the plugin</a>.</p>
+    </section>
+    {% if demo %}
+    <form method="post" action="/dashboard/sites/{{ site.id }}/verify/demo-publish" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="secondary" type="submit">Demo site: publish the DNS record for me</button>
+    </form>{% endif %}
+    <form method="post" action="/dashboard/sites/{{ site.id }}/verify" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Check now</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

@@ -11,7 +11,7 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -19,20 +19,25 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .api.alerts import owned_alert, parse_month, user_alerts
-from .api.auth import _DUMMY_HASH
+from .api.auth import authenticate, create_account, signup_allowed
 from .api.migrations import schedule as schedule_migration
 from .api.migrations import visible_migration
 from .api.patches import owned_site, schedule, visible_job
+from .api.scans import CSV_MAX_BYTES, _authorised_scan, _parse_csv, claim_scan, get_batch, start_batch
 from .api.scans import share_url
 from .api.sites import _domain, add_credential, check_paths
+from . import access
 from .config import Settings
 from .deps import DbDep, SettingsDep
 from .errors import AppError
 from .migration import service as migration_service
 from .models import AuditLog, CredentialKind, Migration, PatchJob, Platform, Site, User
+from . import verification
 from .patch import service
+from .patch.adapters import AdapterError
+from .fakes import DEMO_SUFFIX
 from .scanner.service import TargetRejected, store_scan
-from .security import create_access_token, read_access_token, verify_password
+from .security import create_access_token, read_access_token
 from .wpguard import service as wpg
 from .wpguard.plugin_zip import build_plugin_zip
 from .watchdog import service as wd
@@ -50,7 +55,7 @@ STATE_LABELS = {
 }
 PAGE_HEADERS = {
     "Cache-Control": "no-store",
-    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src https:; form-action 'self'; "
                                "base-uri 'none'; frame-ancestors 'none'",
 }
 
@@ -61,8 +66,11 @@ def _csrf(settings: Settings, session_token: str) -> str:
 
 def _user(request: Request, db: Session, settings: Settings) -> User | None:
     token = request.cookies.get(COOKIE)
-    user_id = read_access_token(settings, token) if token else None
-    return db.get(User, user_id) if user_id is not None else None
+    claims = read_access_token(settings, token) if token else None
+    user = db.get(User, claims[0]) if claims is not None else None
+    if user is not None and claims[1] != (user.token_version or 0):
+        return None  # issued before "log out everywhere"
+    return user
 
 
 def _same_origin(request: Request) -> bool:
@@ -108,8 +116,22 @@ def home() -> RedirectResponse:
 
 
 @router.get("/login")
-def login_page(request: Request):
-    return _render(request, "dashboard/login.html", {})
+def login_page(request: Request, next: str | None = None):
+    return _render(request, "dashboard/login.html", {"next": safe_next(next)})
+
+
+def safe_next(raw: str | None) -> str:
+    """Only local dashboard paths: never an open redirect."""
+    if raw and raw.startswith("/dashboard/") and not raw.startswith("//") and not any(c in raw for c in "\\\r\n"):
+        return raw
+    return "/dashboard/sites"
+
+
+def _start_session(response: Response, settings: Settings, user: User) -> Response:
+    response.set_cookie(COOKIE, create_access_token(settings, user.id, user.token_version),
+                        max_age=settings.access_token_minutes * 60,
+                        httponly=True, samesite="strict", secure=settings.is_production, path="/")
+    return response
 
 
 @router.post("/login")
@@ -118,14 +140,17 @@ async def login(request: Request, db: DbDep, settings: SettingsDep):
         raise AppError(403, "bad_origin", "This form was sent from another website, so we ignored it.")
     form = await request.form()
     email = str(form.get("email", "")).strip().lower()[:320]
-    password = str(form.get("password", ""))[:72]
-    user = db.scalar(select(User).where(User.email == email)) if email else None
-    if not verify_password(password, user.password_hash if user else _DUMMY_HASH) or user is None:
-        return _render(request, "dashboard/login.html", {"error": "That email and password do not match."}, 401)
-    response = RedirectResponse("/dashboard/sites", status_code=303)
-    response.set_cookie(COOKIE, create_access_token(settings, user.id), max_age=settings.access_token_minutes * 60,
-                        httponly=True, samesite="strict", secure=settings.is_production, path="/")
-    return response
+    try:
+        user = authenticate(request, db, settings, email, str(form.get("password", ""))[:72],
+                            str(form.get("code", "")).strip()[:20] or None)
+    except AppError as exc:
+        ctx = {"error": exc.message, "email": email, "need_code": exc.code in {"mfa_required", "invalid_code"},
+               "next": safe_next(str(form.get("next", "")))}
+        response = _render(request, "dashboard/login.html", ctx, exc.status_code)
+        if exc.headers:
+            response.headers.update(exc.headers)
+        return response
+    return _start_session(RedirectResponse(safe_next(str(form.get("next", ""))), status_code=303), settings, user)
 
 
 @router.post("/logout")
@@ -139,7 +164,7 @@ def logout() -> Response:
 
 def _sites_page(request: Request, db: Session, user: User, *, error: str | None = None, status: int = 200):
     settings: Settings = request.app.state.settings
-    sites = db.scalars(select(Site).where(Site.owner_id == user.id).order_by(Site.id)).all()
+    sites = db.scalars(select(Site).where(access.visible_sites_clause(db, user)).order_by(Site.id)).all()
     rows = []
     for site in sites:
         latest = site.scans[-1] if site.scans else None
@@ -264,7 +289,7 @@ async def _patch_action(job_id: int, request: Request, tasks: BackgroundTasks, d
         if mode == "rollback":
             service.request_rollback(db, job, user)
         else:
-            service.approve(db, job, user)
+            service.approve(db, job, user, settings)
     except AppError as exc:
         return _patch_page(request, db, job, error=exc.message, status=exc.status_code)
     schedule(request, tasks, job, user, mode)
@@ -297,7 +322,7 @@ async def toggle_monitoring(site_id: int, request: Request, db: DbDep, settings:
 @router.post("/watchdog/run")
 async def run_watchdog_now(request: Request, db: DbDep, settings: SettingsDep):
     async def action(user: User, form: dict):
-        ids = [s.id for s in db.scalars(select(Site).where(Site.owner_id == user.id)).all()]
+        ids = access.visible_site_ids(db, user)
         await request.app.state.watchdog.run_version_checks(site_ids=ids, force=True)
         await request.app.state.watchdog.poll_feeds()
         return RedirectResponse("/dashboard/alerts", status_code=303)
@@ -358,7 +383,8 @@ async def plan_migration(site_id: int, request: Request, db: DbDep, settings: Se
         site = owned_site(db, site_id, user)
         mig = await migration_service.create_migration(db, site=site, user=user, to_version=None,
                                                        vault=request.app.state.vault,
-                                                       world=request.app.state.demo_world)
+                                                       world=request.app.state.demo_world,
+                                                       sandbox=request.app.state.sandbox)
         return RedirectResponse(f"/dashboard/migrations/{mig.id}", status_code=303)
 
     return await _site_action(request, db, settings, action)
@@ -476,3 +502,150 @@ def wp_guard_plugin_zip(request: Request, db: DbDep, settings: SettingsDep):
         return _to_login()
     return Response(build_plugin_zip(settings.public_base_url), media_type="application/zip",
                     headers={"Content-Disposition": 'attachment; filename="patchwarden.zip"', "Cache-Control": "no-store"})
+
+
+# --- sign-up, claim, verification, guided connection, list scans (Phase B) -------------
+
+@router.get("/signup")
+def signup_page(request: Request, next: str | None = None):
+    return _render(request, "dashboard/signup.html", {"next": safe_next(next)})
+
+
+@router.post("/signup")
+async def signup(request: Request, db: DbDep, settings: SettingsDep):
+    if not _same_origin(request):
+        raise AppError(403, "bad_origin", "This form was sent from another website, so we ignored it.")
+    form = await request.form()
+    email, nxt = str(form.get("email", ""))[:320], safe_next(str(form.get("next", "")))
+    try:
+        signup_allowed(request, settings)
+        user = create_account(db, email, str(form.get("password", ""))[:200])
+    except AppError as exc:
+        response = _render(request, "dashboard/signup.html", {"error": exc.message, "email": email, "next": nxt},
+                           exc.status_code)
+        if exc.headers:
+            response.headers.update(exc.headers)
+        return response
+    return _start_session(RedirectResponse(nxt, status_code=303), settings, user)
+
+
+@router.get("/claim/{scan_id}")
+def claim_page(scan_id: int, request: Request, db: DbDep, settings: SettingsDep, token: str | None = None):
+    here = f"/dashboard/claim/{scan_id}" + (f"?token={quote(token)}" if token else "")
+    user = _user(request, db, settings)
+    if user is None:
+        return RedirectResponse(f"/dashboard/signup?next={quote(here)}", status_code=303)
+    try:
+        scan = _authorised_scan(db, scan_id, user, token, settings)
+    except AppError as exc:
+        return _render(request, "error.html", {"code": exc.code, "message": exc.message}, exc.status_code)
+    return _render(request, "dashboard/claim.html", {"user": user, "scan": scan, "token": token or ""})
+
+
+@router.post("/claim/{scan_id}")
+async def claim_post(scan_id: int, request: Request, db: DbDep, settings: SettingsDep):
+    user, form = await _post_guard(request, db, settings)
+    try:
+        result = claim_scan(scan_id, db, settings, user, str(form.get("token", "")) or None)
+    except AppError as exc:
+        return _render(request, "error.html", {"code": exc.code, "message": exc.message}, exc.status_code)
+    return RedirectResponse(result["next"], status_code=303)
+
+
+def _is_demo_site(request: Request, site: Site) -> bool:
+    return request.app.state.demo_world is not None and site.domain.endswith(DEMO_SUFFIX)
+
+
+def _verify_page(request: Request, db: Session, user: User, site: Site, *, result: dict | None = None,
+                 status: int = 200):
+    return _render(request, "dashboard/verify.html",
+                   {"user": user, "site": site, "v": verification.start(db, site, user), "result": result,
+                    "demo": _is_demo_site(request, site)}, status)
+
+
+@router.get("/sites/{site_id}/verify")
+def verify_page(site_id: int, request: Request, db: DbDep, settings: SettingsDep):
+    user = _user(request, db, settings)
+    if user is None:
+        return _to_login()
+    try:
+        site = owned_site(db, site_id, user)
+    except AppError as exc:
+        return _render(request, "error.html", {"code": exc.code, "message": exc.message}, exc.status_code)
+    return _verify_page(request, db, user, site)
+
+
+@router.post("/sites/{site_id}/verify")
+async def verify_check(site_id: int, request: Request, db: DbDep, settings: SettingsDep):
+    user, _form = await _post_guard(request, db, settings)
+    site = owned_site(db, site_id, user)
+    st = request.app.state
+    result = await verification.check(db, site, user, resolve_txt=st.txt_resolver, fetcher=st.scanner.fetcher)
+    return _verify_page(request, db, user, site, result=result, status=200 if result["verified"] else 409)
+
+
+@router.post("/sites/{site_id}/verify/demo-publish")
+async def verify_demo_publish(site_id: int, request: Request, db: DbDep, settings: SettingsDep):
+    """Demo sites only (make dev): publish the TXT record in the fake DNS, as the owner would at their DNS host."""
+    user, _form = await _post_guard(request, db, settings)
+    site = owned_site(db, site_id, user)
+    if not _is_demo_site(request, site):
+        raise AppError(404, "not_found", "We could not find that.")
+    v = verification.start(db, site, user)
+    request.app.state.demo_world.txt_records[v["dns"]["name"]] = [v["dns"]["value"]]
+    return RedirectResponse(f"/dashboard/sites/{site.id}/verify", status_code=303)
+
+
+@router.get("/sites/{site_id}/connect")
+def connect_page(site_id: int, request: Request, db: DbDep, settings: SettingsDep):
+    user = _user(request, db, settings)
+    if user is None:
+        return _to_login()
+    try:
+        site = owned_site(db, site_id, user)
+    except AppError as exc:
+        return _render(request, "error.html", {"code": exc.code, "message": exc.message}, exc.status_code)
+    return _render(request, "dashboard/connect.html", {"user": user, "site": site})
+
+
+@router.post("/sites/{site_id}/test-connection")
+async def connect_test(site_id: int, request: Request, db: DbDep, settings: SettingsDep):
+    user, _form = await _post_guard(request, db, settings)
+    site = owned_site(db, site_id, user)
+    try:
+        adapter = service.build_adapter(site, request.app.state.vault, request.app.state.demo_world)
+        test = {"ok": True, "message": f"Connected through {adapter.display_name}: the site runs PHP "
+                                       f"{await adapter.php_version()}. Nothing was changed."}
+    except AppError as exc:
+        test = {"ok": False, "message": exc.message}
+    except AdapterError as exc:
+        test = {"ok": False, "message": exc.message}
+    return _render(request, "dashboard/connect.html", {"user": user, "site": site, "test": test},
+                   200 if test["ok"] else 409)
+
+
+@router.post("/scan-batches")
+async def upload_batch(request: Request, tasks: BackgroundTasks, db: DbDep, settings: SettingsDep):
+    user, form = await _post_guard(request, db, settings)
+    upload = form.get("file")
+    try:
+        if upload is None or isinstance(upload, str):
+            raise AppError(400, "missing_file", "Please choose a CSV file with one domain per row.")
+        targets = _parse_csv(await upload.read(CSV_MAX_BYTES + 1))
+        batch = start_batch(request, tasks, db, settings, user, targets, form.get("wordpress") == "on")
+    except AppError as exc:
+        db.rollback()
+        return _sites_page(request, db, user, error=exc.message, status=exc.status_code)
+    return RedirectResponse(f"/dashboard/scan-batches/{batch.id}", status_code=303)
+
+
+@router.get("/scan-batches/{batch_id}")
+def batch_page(batch_id: int, request: Request, db: DbDep, settings: SettingsDep):
+    user = _user(request, db, settings)
+    if user is None:
+        return _to_login()
+    try:
+        data = get_batch(batch_id, db, settings, user)
+    except AppError as exc:
+        return _render(request, "error.html", {"code": exc.code, "message": exc.message}, exc.status_code)
+    return _render(request, "dashboard/batch.html", {"user": user, "b": data})

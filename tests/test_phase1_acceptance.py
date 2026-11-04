@@ -54,18 +54,22 @@ def test_hidden_version_returns_unknown_not_a_guess(client):
     assert "demo-session-value" not in str(scan["raw_headers"])
 
 
-def test_bulk_csv_of_10_domains_stores_10_scans(client):
+def test_bulk_csv_of_10_domains_stores_10_scans(client, auth_headers):
     rows = ["domain"] + [demo(f"bulk-{i:02d}") for i in range(1, 11)]
     csv_bytes = ("\n".join(rows) + "\n").encode()
-    r = client.post("/api/scans", files={"file": ("sites.csv", csv_bytes, "text/csv")})
-    assert r.status_code == 201, r.text
-    body = r.json()
+    # Since Phase B a list runs in the background (202 + a status URL) and needs a free account.
+    assert client.post("/api/scans", files={"file": ("sites.csv", csv_bytes, "text/csv")}).status_code == 401
+    r = client.post("/api/scans", files={"file": ("sites.csv", csv_bytes, "text/csv")}, headers=auth_headers)
+    assert r.status_code == 202, r.text
+    body = client.get(r.json()["status_url"], headers=auth_headers).json()
+    assert body["state"] == "done" and body["total"] == body["done"] == 10
     assert body["count"] == 10
     assert body["rejected"] == []
     assert {s["domain"] for s in body["scans"]} == {demo(f"bulk-{i:02d}") for i in range(1, 11)}
 
     with client.app.state.sessionmaker() as db:
         assert db.query(Scan).count() == 10
+        assert db.query(Scan).filter(Scan.batch_id == body["id"]).count() == 10
     risks = {s["risk"] for s in body["scans"]}
     assert risks == {"safe", "patch_now", "must_migrate", "unknown"}
 

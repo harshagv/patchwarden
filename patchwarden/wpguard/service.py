@@ -110,6 +110,9 @@ async def ingest_report(db: Session, key: PluginKey, report: dict, feed: VulnFee
     site = key.site
     if _host(_clean(report.get("site_url"), 500)) != site.domain.removeprefix("www."):
         raise AppError(409, "site_mismatch", "This key belongs to a different site. Paste the key for this site.")
+    # The plugin runs on this domain with this site's key: that proves control of the site.
+    from ..verification import mark_verified
+    mark_verified(db, site, "plugin", None)
     php_version = _clean(report.get("php_version"), 64)
     parsed = parse_version(php_version)
     if parsed is None:
@@ -285,7 +288,7 @@ async def fix_it(db: Session, site: Site, user: User, *, vault, world) -> dict:
                                            state=PatchState.awaiting_approval, components=updates, origin="fix_it")
     elif updates:
         job = PatchJob(site_id=site.id, from_version=scan.detected_version or "", to_version=scan.detected_version or "",
-                       state=PatchState.awaiting_approval,
+                       state=PatchState.awaiting_approval, requested_by=user.id,
                        report={"origin": "fix_it", "dry_run_at": utcnow().isoformat(), "steps": [],
                                "plan": {"access": "Patchwarden plugin", "from_version": scan.detected_version,
                                         "to_version": scan.detected_version, "checks": [], "components": updates,

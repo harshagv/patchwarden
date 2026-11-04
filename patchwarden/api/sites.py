@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..crypto import CredentialVault
+from .. import access
 from ..deps import CurrentUser, DbDep
 from ..errors import AppError
 from ..models import AccessMethod, AuditLog, Credential, CredentialKind, Platform, Role, Site, User
@@ -110,15 +111,12 @@ def create_site(body: SiteIn, db: DbDep, user: CurrentUser) -> dict:
 
 @router.get("")
 def list_sites(db: DbDep, user: CurrentUser) -> dict:
-    sites = db.scalars(select(Site).where(Site.owner_id == user.id).order_by(Site.id)).all()
+    sites = db.scalars(select(Site).where(access.visible_sites_clause(db, user)).order_by(Site.id)).all()
     return {"sites": [site_json(s) for s in sites]}
 
 
 def _visible(db: Session, site_id: int, user: User, *, write: bool = False) -> Site:
-    site = db.get(Site, site_id)
-    if site is None or (site.owner_id != user.id and (write or user.role != Role.admin)):
-        raise AppError(404, "site_not_found", "We could not find that site.")
-    return site
+    return access.site_for(db, site_id, user, "edit" if write else "view")
 
 
 @router.get("/{site_id}")

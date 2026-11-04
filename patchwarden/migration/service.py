@@ -20,12 +20,14 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from .. import access
 from ..config import Settings
 from ..crypto import CredentialVault
 from ..errors import AppError
 from ..fakes import DemoWorld
 from ..models import AuditLog, Migration, MigrationState, PatchJob, PatchState, Scan, Site, User
 from ..patch.adapters import AdapterError, HostingAdapter
+from ..backups import BackupStore
 from ..patch.service import CHECK_LABELS, PatchRunner, build_adapter, check_targets, run_checks
 from ..scanner.fetch import SafeFetcher
 from ..scanner.versions import FIXED_VERSIONS, fmt, parse_version
@@ -118,7 +120,7 @@ def _pick_target(current: str, requested: str | None, available: list[str] | Non
 
 async def create_migration(db: Session, *, site: Site, user: User, to_version: str | None, vault: CredentialVault,
                            world: DemoWorld | None, uploaded: dict[str, str] | None = None,
-                           from_version: str | None = None) -> Migration:
+                           from_version: str | None = None, sandbox=None) -> Migration:
     adapter: HostingAdapter | None = None
     available = None
     try:
@@ -139,8 +141,16 @@ async def create_migration(db: Session, *, site: Site, user: User, to_version: s
         raise AppError(502, exc.code, exc.message) from None
     target = _pick_target(current, to_version, available)
     breakage = scan_files(files, current, target)
+    plan = build_plan(breakage)
+    if sandbox is not None:  # Rector, PHPStan and php -l in a sandbox (patchwarden/migration/sandbox.py)
+        from .sandbox import plan_additions, tool_scan
+
+        breakage["tools"] = await tool_scan(sandbox, files, target)
+        extra = plan_additions(breakage["tools"])
+        for n, step in enumerate(extra, start=len(plan["fixes"]) + 1):
+            plan["fixes"].append({"step": n, "since": target, **step})
     mig = Migration(site_id=site.id, from_version=current, to_version=target, breakage=breakage,
-                    plan=build_plan(breakage), state=MigrationState.planned,
+                    plan=plan, state=MigrationState.planned,
                     source="host" if uploaded is None else "upload")
     db.add(mig)
     db.flush()
@@ -165,8 +175,7 @@ def _claim(db: Session, mig: Migration, allowed: tuple[MigrationState, ...], new
 
 
 def start_staging(db: Session, mig: Migration, user: User) -> None:
-    if mig.site.owner_id != user.id:
-        raise AppError(403, "owner_only", "Only the site owner can run staging tests.")
+    access.require(db, user, mig.site, "edit")
     # A new staging run makes any earlier sign-off stale.
     _claim(db, mig, RESTAGE_FROM, MigrationState.staging_running, {"signed_off_by": None, "signed_off_at": None})
     audit(db, user.id, mig, "migration.staging_started")
@@ -178,7 +187,9 @@ def _staging_site(site: Site, domain: str):
 
 
 async def run_staging(factory: sessionmaker[Session], settings: Settings, vault: CredentialVault,
-                      world: DemoWorld | None, fetcher: SafeFetcher, mig_id: int, actor_id: int) -> None:
+                      world: DemoWorld | None, fetcher: SafeFetcher, store: BackupStore, mig_id: int,
+                      actor_id: int, resume: bool = False) -> None:
+    """Staging touches only the staging copy, so an interrupted run is simply run again (`resume` is ignored)."""
     with factory() as db:
         mig = db.get(Migration, mig_id)
         if mig is None or mig.state != MigrationState.staging_running:
@@ -255,8 +266,7 @@ async def run_staging(factory: sessionmaker[Session], settings: Settings, vault:
 # --- sign-off and promotion ---------------------------------------------------
 
 def sign_off(db: Session, mig: Migration, user: User) -> None:
-    if mig.site.owner_id != user.id:
-        raise AppError(403, "owner_only", "Only the site owner (or their IT, on the owner's account) can sign off.")
+    access.require(db, user, mig.site, "approve")
     if mig.state != MigrationState.staging_passed:
         raise AppError(409, "staging_not_passed", "Staging has to pass its tests before you can sign off.")
     signed_at = datetime.now(timezone.utc)
@@ -268,8 +278,7 @@ def sign_off(db: Session, mig: Migration, user: User) -> None:
 
 
 def start_promotion(db: Session, mig: Migration, user: User) -> PatchJob:
-    if mig.site.owner_id != user.id:
-        raise AppError(403, "owner_only", "Only the site owner can promote a migration.")
+    access.require(db, user, mig.site, "approve")
     if mig.state in (MigrationState.promoting, MigrationState.promoted):
         raise AppError(409, "not_allowed_now", f"This migration is already {mig.state.value}.")
     if mig.state != MigrationState.signed_off or mig.signed_off_by is None:
@@ -278,7 +287,8 @@ def start_promotion(db: Session, mig: Migration, user: User) -> PatchJob:
     checks = [{"name": n, "label": CHECK_LABELS[n], "path": p} for n, p in check_targets(mig.site)]
     job = PatchJob(
         site_id=mig.site_id, from_version=mig.from_version, to_version=mig.to_version, state=PatchState.running,
-        approved_by=mig.signed_off_by, approved_at=mig.signed_off_at,
+        approved_by=mig.signed_off_by, approved_at=mig.signed_off_at, requested_by=user.id,
+        billing={"item": "included", "covered_by": "migration", "migration_id": mig.id, "amount": 0},
         report={"kind": "migration", "migration_id": mig.id, "dry_run_at": mig.created_at.isoformat(), "steps": [],
                 "plan": {"access": "migration promotion", "from_version": mig.from_version, "to_version": mig.to_version,
                          "checks": checks, "steps": mig.plan.get("steps", []),
@@ -295,13 +305,32 @@ def start_promotion(db: Session, mig: Migration, user: User) -> PatchJob:
 
 
 async def run_promotion(factory: sessionmaker[Session], settings: Settings, vault: CredentialVault,
-                        world: DemoWorld | None, fetcher: SafeFetcher, mig_id: int, actor_id: int) -> None:
+                        world: DemoWorld | None, fetcher: SafeFetcher, store: BackupStore, mig_id: int,
+                        actor_id: int, resume: bool = False) -> None:
     with factory() as db:
         mig = db.get(Migration, mig_id)
         if mig is None or mig.state != MigrationState.promoting or mig.patch_job_id is None:
             return
         job = db.get(PatchJob, mig.patch_job_id)
         promotion = dict(mig.promotion or {})
+
+        def settle() -> None:
+            db.refresh(job)
+            ok = job.state == PatchState.succeeded
+            promotion.update(outcome=job.state.value, message=job.report.get("message"), finished_at=now_iso())
+            mig.promotion = promotion
+            mig.state = MigrationState.promoted if ok else MigrationState.promotion_failed
+            audit(db, actor_id, mig, "migration.promoted" if ok else "migration.promotion_failed",
+                  patch_job_id=job.id, outcome=job.state.value)
+            db.commit()
+
+        if resume and job.state != PatchState.running:
+            return settle()  # the production run finished; only the migration record was left behind
+        if resume and job.report.get("changing"):
+            # Interrupted while production was changing: put production back from the backup.
+            prod = build_adapter(mig.site, vault, world)
+            await PatchRunner(db, job, prod, fetcher, settings, actor_id, store).recover()
+            return settle()
 
         def stop(message: str, state: MigrationState = MigrationState.promotion_failed) -> None:
             job.state = PatchState.failed
@@ -329,17 +358,9 @@ async def run_promotion(factory: sessionmaker[Session], settings: Settings, vaul
         # Code only: production keeps its own database and config files.
         deploy = {p: t for p, t in staging_code.items() if is_code(p) and not is_config(p) and prod_code.get(p) != t}
         promotion["files"] = sorted(deploy)
-        runner = PatchRunner(db, job, prod, fetcher, settings, actor_id)
+        runner = PatchRunner(db, job, prod, fetcher, settings, actor_id, store)
         await runner.run_patch(deploy=deploy)
-
-        db.refresh(job)
-        ok = job.state == PatchState.succeeded
-        promotion.update(outcome=job.state.value, message=job.report.get("message"), finished_at=now_iso())
-        mig.promotion = promotion
-        mig.state = MigrationState.promoted if ok else MigrationState.promotion_failed
-        audit(db, actor_id, mig, "migration.promoted" if ok else "migration.promotion_failed",
-              patch_job_id=job.id, outcome=job.state.value)
-        db.commit()
+        settle()
 
 
 def migration_json(mig: Migration) -> dict:

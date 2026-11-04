@@ -1,0 +1,48 @@
+{% extends "dashboard/layout.html" %}
+{% block title %}Connect {{ site.domain }} to Patchwarden{% endblock %}
+{% block page %}
+<div class="card">
+  <h1>Let Patchwarden update {{ site.domain }}</h1>
+  <p>Patchwarden needs an <strong>API token</strong> from your hosting panel, never your password. You can delete the token at any time, and access ends at once.</p>
+  {% if test %}<p class="{{ 'ok' if test.ok else 'alert' }}">{{ test.message }}</p>{% endif %}
+
+  <section class="block">
+    <h2>If your host uses cPanel</h2>
+    <ol>
+      <li>Log in to cPanel and open <strong>Security → Manage API Tokens</strong>.</li>
+      <li>Press <strong>Create</strong>. Name it <code>patchwarden</code>, and set an <strong>expiry date</strong> (for example, 90 days).</li>
+      <li>Copy the token. cPanel shows it only once.</li>
+      <li>Paste it below as a <em>cpanel_token</em>.</li>
+    </ol>
+    <p class="muted">A cPanel token works for the whole account, so create one just for Patchwarden and delete it when you no longer need it.</p>
+  </section>
+
+  <section class="block">
+    <h2>If your host uses Plesk</h2>
+    <ol>
+      <li>Ask your host for a <strong>Plesk API key</strong> for your subscription, or, if you manage the server, create one with
+          <code>plesk bin secret_key --create</code>.</li>
+      <li>Paste it below as a <em>plesk_token</em>.</li>
+    </ol>
+  </section>
+
+  <section class="block">
+    <h2>WordPress without hosting-panel access</h2>
+    <p>Use the <a href="/dashboard/wp-guard/{{ site.id }}">Patchwarden plugin</a> instead. It can update plugins and themes after you approve, but it can't change PHP.</p>
+  </section>
+
+  <section class="block">
+    <h2>Save the token</h2>
+    <form method="post" action="/dashboard/sites/{{ site.id }}/credentials" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <select name="kind"><option value="cpanel_token">cpanel_token</option><option value="plesk_token">plesk_token</option></select>
+      <input name="value" type="password" placeholder="API token (never a password)" autocomplete="off" minlength="8" required>
+      <button type="submit">Save token</button>
+    </form>
+    {% if site.credentials %}
+    <form method="post" action="/dashboard/sites/{{ site.id }}/test-connection" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary" type="submit">Test the connection (read-only)</button>
+    </form>{% endif %}
+  </section>
+</div>
+{% endblock %}

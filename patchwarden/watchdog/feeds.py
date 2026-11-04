@@ -239,3 +239,74 @@ class FixtureSource:
         out = parse_nvd({"vulnerabilities": data.get("nvd", [])}, source="fixture")
         out += [a for a in (release_advisory(r) for r in data.get("php_releases", [])) if a]
         return out
+
+
+# --- exploitation signals: CISA KEV and FIRST EPSS -------------------------------
+
+KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+EPSS_URL = "https://api.first.org/data/v1/epss"
+
+
+class KevFeed:
+    """CISA's Known Exploited Vulnerabilities catalog: CVE id -> date added."""
+
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None, fixture: Path | None = None):
+        self.fixture = fixture
+        self._client = httpx.AsyncClient(transport=transport, timeout=30, trust_env=False,
+                                         headers={"User-Agent": "Patchwarden-Watchdog/0.1"})
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def exploited(self) -> dict[str, str]:
+        if self.fixture is not None:
+            try:
+                data = json.loads(self.fixture.read_text()).get("kev", [])
+            except (OSError, ValueError):
+                raise FeedError("could not read the fixture KEV list") from None
+            return {str(k["cveID"]).upper(): str(k.get("dateAdded", "")) for k in data if k.get("cveID")}
+        try:
+            r = await self._client.get(KEV_URL)
+            payload = r.json() if r.status_code == 200 else None
+        except (httpx.HTTPError, ValueError):
+            raise FeedError("CISA KEV feed failed") from None
+        if not isinstance(payload, dict):
+            raise FeedError(f"CISA KEV feed answered HTTP {r.status_code}")
+        return {str(v["cveID"]).upper(): str(v.get("dateAdded", ""))
+                for v in payload.get("vulnerabilities", []) if isinstance(v, dict) and v.get("cveID")}
+
+
+class EpssClient:
+    """FIRST's Exploit Prediction Scoring System: CVE id -> probability of exploitation in the next 30 days."""
+
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None, fixture: Path | None = None):
+        self.fixture = fixture
+        self._client = httpx.AsyncClient(transport=transport, timeout=30, trust_env=False,
+                                         headers={"User-Agent": "Patchwarden-Watchdog/0.1"})
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def scores(self, cve_ids: list[str]) -> dict[str, float]:
+        ids = [c for c in dict.fromkeys(cve_ids) if c.upper().startswith("CVE-")]
+        if not ids:
+            return {}
+        if self.fixture is not None:
+            try:
+                data = json.loads(self.fixture.read_text()).get("epss", {})
+            except (OSError, ValueError):
+                raise FeedError("could not read the fixture EPSS scores") from None
+            return {c: float(data[c]) for c in ids if c in data}
+        out: dict[str, float] = {}
+        for i in range(0, len(ids), 100):  # the API takes a comma-separated list
+            try:
+                r = await self._client.get(EPSS_URL, params={"cve": ",".join(ids[i:i + 100])})
+                payload = r.json() if r.status_code == 200 else {}
+            except (httpx.HTTPError, ValueError):
+                raise FeedError("FIRST EPSS request failed") from None
+            for row in payload.get("data", []) if isinstance(payload, dict) else []:
+                try:
+                    out[str(row["cve"]).upper()] = float(row["epss"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+        return out

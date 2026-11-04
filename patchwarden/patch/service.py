@@ -16,6 +16,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.orm.attributes import flag_modified
 
+from .. import access, billing
 from ..config import Settings
 from ..crypto import CredentialVault
 from ..errors import AppError
@@ -23,12 +24,13 @@ from ..fakes import DemoWorld, FakeHostingAdapter
 from ..models import AuditLog, Backup, Credential, PatchJob, PatchState, Platform, Site, User
 from ..scanner.fetch import FetchError, SafeFetcher
 from ..scanner.versions import FIXED_VERSIONS, LAST_DEAD_BRANCH, fmt, parse_version
+from ..backups import BackupError, BackupStore
 from .adapters import (
     CREDENTIAL_FOR_METHOD,
     REAL_ADAPTERS,
     AdapterError,
-    BackupArtifact,
     HostingAdapter,
+    RestoreCheck,
 )
 
 log = logging.getLogger(__name__)
@@ -176,7 +178,8 @@ async def create_dry_run(db: Session, *, site: Site, user: User, to_version: str
     report = {"plan": plan, "dry_run_at": now_iso(), "steps": []}
     if origin:
         report["origin"] = origin
-    job = PatchJob(site_id=site.id, from_version=current, to_version=target, state=state, report=report)
+    job = PatchJob(site_id=site.id, from_version=current, to_version=target, state=state, report=report,
+                   requested_by=user.id)
     db.add(job)
     db.flush()
     audit(db, user_id=user.id, site_id=site.id, action="patch.dry_run", patch_job_id=job.id,
@@ -200,22 +203,30 @@ def _claim(db: Session, job: PatchJob, allowed: tuple[PatchState, ...], values: 
     db.refresh(job)
 
 
-def approve(db: Session, job: PatchJob, user: User) -> None:
-    if job.site.owner_id != user.id:
-        # Only the site owner approves changes to their site.
-        raise AppError(403, "owner_only", "Only the site owner can approve this change.")
+def approve(db: Session, job: PatchJob, user: User, settings: Settings | None = None) -> None:
+    access.require(db, user, job.site, "approve")
+    if access.separate_approver_required(db, job.site) and job.requested_by == user.id:
+        raise AppError(403, "separate_approver_required",
+                       "Your team requires a second person to approve changes. Ask an approver to approve this one.")
     approved_at = datetime.now(timezone.utc)
-    _claim(db, job, APPROVABLE, {"approved_by": user.id, "approved_at": approved_at})
+    # What this delivery costs is fixed now, when the work is approved (patchwarden/billing.py).
+    entitlement = (billing.patch_entitlement(db, settings, job.site) if settings is not None else
+                   {"item": "included" if billing.active_subscription(db, job.site) else "patch_fee"})
+    _claim(db, job, APPROVABLE, {"approved_by": user.id, "approved_at": approved_at, "billing": entitlement})
     audit(db, user_id=user.id, site_id=job.site_id, action="patch.approved", patch_job_id=job.id,
-          from_version=job.from_version, to_version=job.to_version, approved_at=approved_at.isoformat())
+          from_version=job.from_version, to_version=job.to_version, approved_at=approved_at.isoformat(),
+          billing=entitlement["item"])
     db.commit()
 
 
 def request_rollback(db: Session, job: PatchJob, user: User) -> None:
-    if job.site.owner_id != user.id:
-        raise AppError(403, "owner_only", "Only the site owner can roll back this change.")
+    access.require(db, user, job.site, "approve")
     if job.backup_id is None:
         raise AppError(409, "no_backup", "There is no backup for this change, so there is nothing to roll back to.")
+    if job.backup is not None and job.backup.deleted_at is not None:
+        raise AppError(409, "backup_expired",
+                       "The backup for this change has passed its retention period and was deleted, "
+                       "so it can no longer be rolled back automatically.")
     _claim(db, job, (PatchState.succeeded,), {})
     audit(db, user_id=user.id, site_id=job.site_id, action="patch.rollback_requested", patch_job_id=job.id,
           backup_id=job.backup_id)
@@ -226,9 +237,9 @@ def request_rollback(db: Session, job: PatchJob, user: User) -> None:
 
 class PatchRunner:
     def __init__(self, db: Session, job: PatchJob, adapter: HostingAdapter, fetcher: SafeFetcher,
-                 settings: Settings, actor_id: int):
+                 settings: Settings, actor_id: int, store: BackupStore):
         self.db, self.job, self.adapter, self.fetcher = db, job, adapter, fetcher
-        self.settings, self.actor_id = settings, actor_id
+        self.settings, self.actor_id, self.store = settings, actor_id, store
         self.site = job.site
         self.report = dict(job.report or {})
         self.report.setdefault("steps", [])
@@ -254,9 +265,14 @@ class PatchRunner:
         self._save()
         self.audit(f"patch.{state.value}", message=message)
 
-    def _artifact(self) -> BackupArtifact:
+    def _archive(self) -> bytes:
         b = self.job.backup
-        return BackupArtifact(location=b.location, checksum=b.checksum)
+        if b is None or b.deleted_at is not None:
+            raise AdapterError("backup_gone", "The backup is no longer kept (its retention period ended).")
+        try:
+            return self.store.read(b.location, b.checksum)
+        except BackupError as exc:
+            raise AdapterError("backup_unreadable", exc.message) from None
 
     # the patch
     async def run_patch(self, deploy: dict[str, str] | None = None) -> None:
@@ -273,22 +289,33 @@ class PatchRunner:
                 return self.finish(PatchState.failed, "The site changed since the dry run. Nothing was changed. "
                                                       "Start a new dry run.")
 
-            # 1. backup, verified, or stop
+            # 1. backup: encrypted at rest, decrypted again and dry-run restored, or stop
             try:
-                artifact = await adapter.create_backup(self.settings.backup_dir)
-                check = await adapter.verify_restore(artifact)
+                data = await adapter.create_backup()
+                stored = self.store.put(self.site.domain, data.archive, data.checksum)
+                if stored.host_checksum_ok:
+                    check = await adapter.verify_restore(self.store.read(stored.location, stored.checksum))
+                else:
+                    check = RestoreCheck(False, "The backup checksum does not match.")
             except AdapterError as exc:
                 self.step("backup", False, exc.message)
                 return self.finish(PatchState.failed, "The backup failed, so we stopped. Nothing was changed.")
-            backup = Backup(site_id=self.site.id, location=artifact.location, checksum=artifact.checksum,
-                            verified=check.ok)
+            except BackupError as exc:
+                self.step("backup", False, exc.message)
+                return self.finish(PatchState.failed, "The backup could not be stored safely, so we stopped. "
+                                                      "Nothing was changed.")
+            now = datetime.now(timezone.utc)
+            backup = Backup(site_id=self.site.id, location=stored.location, checksum=stored.checksum,
+                            verified=check.ok, encrypted=True, size=stored.size, created_at=now,
+                            expires_at=self.store.expiry(now))
             self.db.add(backup)
             self.db.flush()
             job.backup_id = backup.id
-            self.report["backup"] = {"id": backup.id, "location": artifact.location, "checksum": artifact.checksum,
-                                     "verified": check.ok, "restore_dry_run": check.detail}
-            self.audit("backup.created", location=artifact.location, checksum=artifact.checksum,
-                       verified=check.ok, restore_dry_run=check.detail)
+            self.report["backup"] = {"id": backup.id, "location": stored.location, "checksum": stored.checksum,
+                                     "verified": check.ok, "restore_dry_run": check.detail, "encrypted": True,
+                                     "expires_at": backup.expires_at.isoformat()}
+            self.audit("backup.created", location=stored.location, checksum=stored.checksum,
+                       verified=check.ok, restore_dry_run=check.detail, encrypted=True)
             if not check.ok:
                 self.step("backup", False, check.detail)
                 return self.finish(PatchState.failed, "The backup could not be verified, so we stopped. "
@@ -305,6 +332,10 @@ class PatchRunner:
                                    + _describe(failing) + "), so we stopped. Nothing was changed.")
             self.step("before_checks", True, "All checks passed.")
 
+            # From here on production changes. Record that first, so a run interrupted by a crash
+            # or restart is recovered by restoring the backup (see recover()).
+            self.report["changing"] = True
+            self._save()
             changed = True
             if deploy:
                 await adapter.write_files(deploy)
@@ -354,13 +385,29 @@ class PatchRunner:
     async def run_rollback(self) -> None:
         await self._rollback(trigger="owner", reason="the site owner asked for it")
 
+    async def recover(self) -> None:
+        """Resume after an interruption (the server died or restarted while the job ran).
+
+        If production had started to change, the outcome of the interrupted steps is unknown, so the
+        safe move is to put the site back exactly as it was: restore the verified backup and the old
+        PHP version, then re-check. If nothing had changed yet, run the patch again from the start.
+        """
+        self.report.setdefault("recoveries", []).append(now_iso())
+        self._save()
+        self.audit("job.recovered", changing=bool(self.report.get("changing")))
+        if self.report.get("changing") and self.job.backup_id:
+            await self._rollback(trigger="recovery",
+                                 reason="the run was interrupted (the server stopped) during the change")
+        else:
+            await self.run_patch()
+
     async def _rollback(self, *, trigger: str, reason: str) -> None:
         job, adapter = self.job, self.adapter
         info: dict[str, Any] = {"trigger": trigger, "reason": reason, "started_at": now_iso(),
                                 "backup_id": job.backup_id}
         self.report["rollback"] = info
         try:
-            await adapter.restore_backup(self._artifact())
+            await adapter.restore_backup(self._archive())
             self.audit("backup.restored", trigger=trigger)
             await adapter.set_php_version(job.from_version)
             await adapter.restart_php()
@@ -378,7 +425,8 @@ class PatchRunner:
         info["ok"] = version == job.from_version and not failing
         self.step("rollback", info["ok"], "Backup restored and PHP switched back to " + version + "."
                   + (" Still failing: " + _describe(failing) if failing else ""))
-        why = "automatically because " if trigger == "automatic" else "because "
+        why = {"automatic": "automatically because ", "recovery": "automatically, after an interruption, because "
+               }.get(trigger, "because ")
         if info["ok"]:
             self.finish(PatchState.rolled_back,
                         f"The change was rolled back {why}{reason}. The site is back on PHP {job.from_version} "
@@ -398,8 +446,10 @@ def _describe(failing: list[dict]) -> str:
 
 
 async def run_job(factory: sessionmaker[Session], settings: Settings, vault: CredentialVault,
-                  world: DemoWorld | None, fetcher: SafeFetcher, job_id: int, actor_id: int, mode: str) -> None:
-    """Background task: runs after the approve/rollback request has returned."""
+                  world: DemoWorld | None, fetcher: SafeFetcher, store: BackupStore, job_id: int, actor_id: int,
+                  mode: str, resume: bool = False) -> None:
+    """Runs a patch or rollback. Called by the job queue (patchwarden/jobs.py); `resume` is set when an
+    earlier attempt was interrupted."""
     with factory() as db:
         job = db.get(PatchJob, job_id)
         if job is None or job.state != PatchState.running:
@@ -420,9 +470,11 @@ async def run_job(factory: sessionmaker[Session], settings: Settings, vault: Cre
                   message=exc.message)
             db.commit()
             return
-        runner = PatchRunner(db, job, adapter, fetcher, settings, actor_id)
+        runner = PatchRunner(db, job, adapter, fetcher, settings, actor_id, store)
         if mode == "rollback":
             await runner.run_rollback()
+        elif resume:
+            await runner.recover()
         else:
             await runner.run_patch()
             db.refresh(job)
@@ -432,9 +484,12 @@ async def run_job(factory: sessionmaker[Session], settings: Settings, vault: Cre
 
 
 def _queue_components(db: Session, job: PatchJob, message: str) -> None:
+    from ..models import PluginAction
     from ..wpguard.service import queue_component_updates
 
-    queue_component_updates(db, job)
+    # Resumed after an interruption: the actions may already be queued; never queue them twice.
+    if db.scalar(select(PluginAction.id).where(PluginAction.patch_job_id == job.id).limit(1)) is None:
+        queue_component_updates(db, job)
     job.state = PatchState.running  # finished when the plugin reports back
     job.report = {**job.report, "message": message, "started_at": job.report.get("started_at") or now_iso()}
     db.commit()
@@ -450,7 +505,9 @@ def job_json(job: PatchJob) -> dict:
         "from_version": job.from_version,
         "to_version": job.to_version,
         "backup": ({"id": b.id, "location": b.location, "checksum": b.checksum, "verified": b.verified,
-                    "created_at": b.created_at.isoformat()} if b else None),
+                    "encrypted": bool(b.encrypted), "created_at": b.created_at.isoformat(),
+                    "expires_at": b.expires_at.isoformat() if b.expires_at else None,
+                    "deleted_at": b.deleted_at.isoformat() if b.deleted_at else None} if b else None),
         "approved_by": job.approved_by,
         "approved_at": job.approved_at.isoformat() if job.approved_at else None,
         "report": job.report,

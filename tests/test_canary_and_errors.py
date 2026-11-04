@@ -111,11 +111,11 @@ def test_validation_error_names_fields_not_values(client):
     assert r.json() == {"error": "invalid_request", "message": "Some fields are missing or invalid: password."}
 
 
-def test_csv_limits(client, settings):
+def test_csv_limits(client, settings, auth_headers):
     too_many = "\n".join(f"site{n}.example" for n in range(settings.scan_bulk_max + 1)).encode()
-    r = client.post("/api/scans", files={"file": ("s.csv", too_many, "text/csv")})
+    r = client.post("/api/scans", files={"file": ("s.csv", too_many, "text/csv")}, headers=auth_headers)
     assert r.status_code == 413 and r.json()["error"] == "too_many_domains"
-    r = client.post("/api/scans", files={"file": ("s.csv", b"\xff\xfe\x00bad", "text/csv")})
+    r = client.post("/api/scans", files={"file": ("s.csv", b"\xff\xfe\x00bad", "text/csv")}, headers=auth_headers)
     assert r.status_code == 400 and r.json()["error"] == "invalid_csv"
 
 

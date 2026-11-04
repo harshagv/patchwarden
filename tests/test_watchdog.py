@@ -241,7 +241,7 @@ def test_scheduler_runs_inside_the_app(settings, scanner, world):
                      notifier=OutboxNotifier(), sources=[])
     with TestClient(app):
         jobs = {j.id: j for j in app.state.scheduler.get_jobs()}
-        assert set(jobs) == {"watchdog_tick", "monthly_reports"}
+        assert set(jobs) == {"watchdog_tick", "monthly_reports", "backup_retention", "daily_digest", "dunning"}
         assert jobs["watchdog_tick"].trigger.interval == timedelta(hours=1)
     assert not app.state.scheduler.running
 

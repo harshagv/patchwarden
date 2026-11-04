@@ -40,8 +40,10 @@ def optional_user(
 ) -> User | None:
     if creds is None:
         return None
-    user_id = read_access_token(settings, creds.credentials)
-    user = db.get(User, user_id) if user_id is not None else None
+    claims = read_access_token(settings, creds.credentials)
+    user = db.get(User, claims[0]) if claims is not None else None
+    if user is not None and claims[1] != (user.token_version or 0):
+        user = None  # issued before "log out everywhere"
     if user is None:
         raise AppError(401, "invalid_token", "Your login has expired or is not valid. Please log in again.")
     return user

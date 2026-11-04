@@ -77,10 +77,13 @@ def test_approved_patch_moves_php84_to_fixed_version_and_checks_pass(client, aut
     assert all(c["ok"] for c in report["before"]["checks"] + report["after"]["checks"])
     assert [s["step"] for s in report["steps"]] == ["backup", "before_checks", "switch", "restart", "after_checks"]
 
-    # The backup was taken first, is on disk, and matches its checksum.
+    # The backup was taken first, is encrypted on disk, and decrypts to exactly the checksummed archive.
     backup = done["backup"]
-    assert backup["verified"] is True
-    assert hashlib.sha256(Path(backup["location"]).read_bytes()).hexdigest() == backup["checksum"]
+    assert backup["verified"] is True and backup["encrypted"] is True and backup["expires_at"]
+    on_disk = Path(backup["location"]).read_bytes()
+    assert b"wp-config.php" not in on_disk and b"orders" not in on_disk
+    archive = client.app.state.backup_store.read(backup["location"], backup["checksum"])
+    assert hashlib.sha256(archive).hexdigest() == backup["checksum"] and b"wp-config.php" in archive
     assert done["approved_by"] is not None and done["approved_at"]
 
     with client.app.state.sessionmaker() as db:
@@ -185,7 +188,7 @@ def test_no_credential_in_logs_reports_or_responses(client, auth_headers, world,
         assert any(client.app.state.vault.decrypt(c.encrypted_value) == canary for c in db.query(Credential).all())
     for f in Path(settings.backup_dir).rglob("*"):
         if f.is_file():
-            assert canary not in f.read_text()
+            assert canary.encode() not in f.read_bytes()
 
 
 def _login_cookie(client) -> None:

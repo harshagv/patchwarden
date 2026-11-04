@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from .. import access
 from ..deps import CurrentUser, DbDep
 from ..errors import AppError
 from ..models import PatchJob, Role, Site, User
@@ -22,23 +23,23 @@ class PatchRequest(BaseModel):
 
 
 def owned_site(db: Session, site_id: int, user: User) -> Site:
-    site = db.get(Site, site_id)
-    if site is None or site.owner_id != user.id:
-        raise AppError(404, "site_not_found", "We could not find that site.")
-    return site
+    return access.site_for(db, site_id, user, "edit")
 
 
 def visible_job(db: Session, job_id: int, user: User) -> PatchJob:
     job = db.get(PatchJob, job_id)
-    if job is None or (job.site.owner_id != user.id and user.role != Role.admin):
+    if job is None or not access.can(db, user, job.site, "view"):
         raise AppError(404, "patch_not_found", "We could not find that patch.")
     return job
 
 
 def schedule(request: Request, tasks: BackgroundTasks, job: PatchJob, user: User, mode: str) -> None:
-    st = request.app.state
-    tasks.add_task(service.run_job, st.sessionmaker, st.settings, st.vault, st.demo_world,
-                   st.scanner.fetcher, job.id, user.id, mode)
+    """Record a durable job, then start it straight away. If the server dies mid-run, the job queue
+    picks it up again and recovers (patchwarden/jobs.py)."""
+    queue = request.app.state.jobs
+    with request.app.state.sessionmaker() as db:
+        queued = queue.enqueue(db, "rollback" if mode == "rollback" else "patch", job.id, user.id)
+    tasks.add_task(queue.run_one, queued.id)
 
 
 @router.post("", status_code=201)
@@ -59,7 +60,7 @@ def get_patch(job_id: int, db: DbDep, user: CurrentUser) -> dict:
 def approve_patch(job_id: int, request: Request, tasks: BackgroundTasks, db: DbDep, user: CurrentUser):
     """Owner approval. Records who approved and when, then runs the patch."""
     job = visible_job(db, job_id, user)
-    service.approve(db, job, user)
+    service.approve(db, job, user, request.app.state.settings)
     schedule(request, tasks, job, user, "patch")
     return JSONResponse(service.job_json(job), status_code=202)
 

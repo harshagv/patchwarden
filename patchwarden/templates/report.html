@@ -38,6 +38,9 @@
         <p>We could not see WordPress on this page, so we could not list plugins or themes.</p>
       {% elif not wp.components %}
         <p>This is a WordPress site, but it does not show which plugins or themes it uses.</p>
+      {% elif report.detail != "full" %}
+        <p>We found {{ wp.components }} plugin(s) and theme(s){% if wp.issues %}, and <strong>{{ wp.issues }} known security problem(s)</strong> among them{% endif %}.
+           Verify that you own this site to see which ones and what to update.</p>
       {% else %}
         <ul>
         {% for c in wp.components %}
@@ -59,6 +62,19 @@
     </section>
     {% endif %}
   </div>
+
+  {% if report.detail != "full" %}
+  <section class="block cta">
+    {% if report.risk == "unknown" %}
+      <h2>See your real version</h2>
+      <p>This site hides its PHP version. Claim it for free and install the Patchwarden plugin, and we will read the exact version from the inside.</p>
+    {% else %}
+      <h2>Is this your site?</h2>
+      <p>Claim it for free: see the full report, get a daily check, and fix it with one approval.</p>
+    {% endif %}
+    <p><a class="cta__button" href="{{ claim_url }}">Claim this site</a></p>
+  </section>
+  {% endif %}
 
   <details>
     <summary>Technical details</summary>

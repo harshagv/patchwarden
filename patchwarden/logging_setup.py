@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 
-from .config import Settings
+from .config import Settings, split_keys
 
 _PATTERNS = [
     # Share-link tokens in access-log query strings.
@@ -40,8 +40,9 @@ class RedactingFilter(logging.Filter):
 
 
 def configure_logging(settings: Settings) -> None:
-    redactor = RedactingFilter([settings.jwt_secret, settings.credential_key,
-                                settings.nvd_api_key, settings.smtp_password])
+    secrets = [settings.jwt_secret, settings.nvd_api_key, settings.smtp_password]
+    secrets += split_keys(settings.credential_key) + split_keys(settings.backup_key)
+    redactor = RedactingFilter(secrets)
     root = logging.getLogger()
     if not root.handlers:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")

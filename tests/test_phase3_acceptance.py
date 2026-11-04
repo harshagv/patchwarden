@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from patchwarden.models import Alert, WatchCheck
+from patchwarden.models import Alert, WatchCheck, WatchCounter
 
 from .conftest import demo
 
@@ -119,15 +119,17 @@ def test_monitoring_off_stops_checks(client, auth_headers, nvd):
     run(watchdog.run_version_checks(OCT))
     run(watchdog.poll_feeds(OCT))
 
-    def checks() -> int:
+    def checks() -> int:  # every check is counted per day; rows are kept for version checks and hits
         with client.app.state.sessionmaker() as db:
-            return db.query(WatchCheck).filter(WatchCheck.site_id == site_id).count()
+            counted = sum(c.version_checks + c.cve_checks
+                          for c in db.query(WatchCounter).filter(WatchCounter.site_id == site_id))
+            return counted + db.query(WatchCheck).filter(WatchCheck.site_id == site_id).count()
 
     def alerts() -> int:
         with client.app.state.sessionmaker() as db:
             return db.query(Alert).filter(Alert.site_id == site_id).count()
 
-    assert checks() == 2  # one version check, one CVE check
+    assert checks() == 3  # one version check (counted and recorded), one CVE check (counted)
     r = client.post(f"/api/sites/{site_id}/monitoring", json={"enabled": False}, headers=auth_headers)
     assert r.json() == {"site_id": site_id, "monitoring": False,
                         "subscription": {"id": r.json()["subscription"]["id"], "product": "watchdog",
@@ -149,4 +151,4 @@ def test_monitoring_off_stops_checks(client, auth_headers, nvd):
     # Turning it back on resumes checks.
     client.post(f"/api/sites/{site_id}/monitoring", json={"enabled": True}, headers=auth_headers)
     run(watchdog.run_version_checks(OCT + timedelta(days=5)))
-    assert checks() == before_checks + 1
+    assert checks() == before_checks + 2  # its version check: counted and recorded

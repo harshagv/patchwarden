@@ -82,6 +82,14 @@ def demo(label: str) -> str:
     return f"{label}{demo_sites.DEMO_SUFFIX}"
 
 
+def verify_site(client, auth: dict, world, site_id: int) -> None:
+    """Prove ownership the DNS way: publish the TXT record in the fake world, then check."""
+    v = client.post(f"/api/sites/{site_id}/verification", headers=auth).json()
+    world.txt_records[v["dns"]["name"]] = [v["dns"]["value"]]
+    r = client.post(f"/api/sites/{site_id}/verification/check", headers=auth)
+    assert r.status_code == 200 and r.json()["method"] == "dns", r.text
+
+
 @pytest.fixture
 def auth_headers(client):
     client.post("/api/auth/register", json={"email": "owner@example.com", "password": "correct horse battery"})

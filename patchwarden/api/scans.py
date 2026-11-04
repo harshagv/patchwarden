@@ -5,17 +5,21 @@ from __future__ import annotations
 import csv
 import io
 import json
+from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, object_session
 
 from ..config import Settings
+from .. import access
 from ..deps import CurrentUser, DbDep, OptionalUser, SettingsDep
-from ..errors import AppError, error_body
-from ..models import Role, Scan, User
+from ..errors import AppError
+from ..models import AuditLog, Role, Scan, ScanBatch, Site, User
+from ..ratelimit import client_ip, too_many
 from ..scanner.service import Scanner, TargetRejected, store_scan
 from ..security import create_share_token, share_token_allows
 
@@ -56,8 +60,36 @@ def share_url(settings: Settings, scan: Scan) -> tuple[str, str]:
     return f"{settings.public_base_url}/scans/{scan.id}?token={token}", expires.isoformat()
 
 
-def scan_json(scan: Scan, *, settings: Settings | None = None) -> dict[str, Any]:
+BASIC_FINDINGS = ("summary", "next_step", "fixed_version", "cves", "php_detected", "php_hint", "version_source",
+                  "notes", "error", "redirects", "status_code", "final_url", "source")
+UNLOCK = ("Verify that you own this site to see the full report: the response headers, and which plugins "
+          "or themes have known security problems.")
+
+
+def detail_level(scan: Scan, user: User | None, via_share_link: bool = False) -> str:
+    """'full' for a verified owner (or admin), and for a share link a verified owner sent; else 'basic'.
+
+    Everyone sees the version, the risk and what to do: that is what the site shows the world anyway.
+    The details that help an attacker (headers, which plugin is vulnerable) need proof of ownership.
+    """
+    site = scan.site
+    db = object_session(site)
+    if user is not None and (user.role == Role.admin or
+                             (site.verified_at and site.owner_id is not None and access.can(db, user, site, "view"))):
+        return "full"
+    if via_share_link and site.owner_id is not None and site.verified_at is not None:
+        return "full"
+    return "basic"
+
+
+def scan_json(scan: Scan, *, settings: Settings | None = None, level: str = "full") -> dict[str, Any]:
     f = scan.findings or {}
+    if level != "full":
+        wp = f.get("wordpress")
+        f = {k: f[k] for k in BASIC_FINDINGS if k in f}
+        if wp:
+            f["wordpress"] = {"detected": wp.get("detected"), "core_version": wp.get("core_version"),
+                              "issues": wp.get("issues", 0), "components": len(wp.get("components") or [])}
     out: dict[str, Any] = {
         "id": scan.id,
         "site_id": scan.site_id,
@@ -70,9 +102,13 @@ def scan_json(scan: Scan, *, settings: Settings | None = None) -> dict[str, Any]
         "fixed_version": f.get("fixed_version"),
         "cves": f.get("cves", []),
         "findings": f,
-        "raw_headers": scan.raw_headers,
+        "raw_headers": scan.raw_headers if level == "full" else {},
         "created_at": scan.created_at.isoformat(),
+        "batch_id": scan.batch_id,
+        "detail": level,
     }
+    if level != "full":
+        out["unlock"] = UNLOCK
     if settings is not None:
         out["share_url"], out["share_expires_at"] = share_url(settings, scan)
     return out
@@ -122,38 +158,77 @@ async def _read_request(request: Request) -> tuple[list[str], bool, bool]:
 
 
 @router.post("/api/scans", status_code=201, openapi_extra=_REQUEST_DOCS)
-async def create_scans(request: Request, db: DbDep, settings: SettingsDep, user: OptionalUser) -> JSONResponse:
-    """Scan one domain (JSON) or many (JSON list or CSV upload). No login needed: the scan is free."""
+async def create_scans(request: Request, tasks: BackgroundTasks, db: DbDep, settings: SettingsDep,
+                       user: OptionalUser) -> JSONResponse:
+    """Scan one domain (free, no login), or a list (JSON or CSV upload: needs a free account, runs in the
+    background, answers 202 with a status URL)."""
     targets, wordpress, bulk = await _read_request(request)
+    if bulk:
+        if user is None:
+            raise AppError(401, "login_required", "Create a free account to scan a list of sites.")
+        batch = start_batch(request, tasks, db, settings, user, targets, wordpress)
+        return JSONResponse({"batch": batch_json(batch, settings), "status_url": f"/api/scan-batches/{batch.id}"},
+                            status_code=202)
+    targets = _checked_targets(request, settings, user, targets)
+
+    scanner: Scanner = request.app.state.scanner
+    try:
+        result = await scanner.scan(targets[0], wordpress_requested=wordpress)
+    except TargetRejected as exc:
+        raise AppError(400, exc.code, exc.message) from None
+    scan = store_scan(db, result, user=user, wordpress_requested=wordpress)
+    if user is None:
+        db.add(AuditLog(user_id=None, site_id=scan.site_id, action="scan.free", detail={"scan_id": scan.id}))
+    db.commit()
+    body = {"count": 1, "scans": [scan_json(scan, settings=settings, level=detail_level(scan, user))], "rejected": []}
+    return JSONResponse(body, status_code=201)
+
+
+def _checked_targets(request: Request, settings: Settings, user: User | None, targets: list[str]) -> list[str]:
     targets = list(dict.fromkeys(t.strip() for t in targets if t.strip()))
     if not targets:
         raise AppError(422, "no_domains", "We did not find any website addresses to scan.")
     if len(targets) > settings.scan_bulk_max:
         raise AppError(413, "too_many_domains", f"Please send at most {settings.scan_bulk_max} domains at a time.")
+    # Each domain counts: per account when logged in, per connection when not.
+    limits = request.app.state.limits
+    window, key = ((limits.scan_user, f"user:{user.id}") if user else
+                   (limits.scan_ip, f"ip:{client_ip(request, settings)}"))
+    wait = window.retry_after(key, len(targets))
+    if wait:
+        raise too_many(f"That is more scans than we allow at once. Please wait {wait} seconds and try again.", wait)
+    window.hit(key, len(targets))
+    return targets
 
-    scanner: Scanner = request.app.state.scanner
-    if bulk:
-        results = await scanner.scan_many(targets, wordpress_requested=wordpress)
-    else:
-        try:
-            results = [await scanner.scan(targets[0], wordpress_requested=wordpress)]
-        except TargetRejected as exc:
-            raise AppError(400, exc.code, exc.message) from None
 
-    scans: list[Scan] = []
-    rejected: list[dict[str, str]] = []
-    for target, r in zip(targets, results):
-        if isinstance(r, TargetRejected):
-            rejected.append({"input": target[:200], **error_body(r.code, r.message)})
-        else:
-            scans.append(store_scan(db, r, user=user, wordpress_requested=wordpress))
+def start_batch(request: Request, tasks: BackgroundTasks, db: Session, settings: Settings, user: User,
+                targets: list[str], wordpress: bool) -> ScanBatch:
+    """Record a list scan as a durable background job and start it (shared by the API and the dashboard)."""
+    targets = _checked_targets(request, settings, user, targets)
+    batch = ScanBatch(owner_id=user.id, targets=targets, total=len(targets), wordpress=wordpress)
+    db.add(batch)
+    db.add(AuditLog(user_id=user.id, action="scan_batch.created", detail={"total": len(targets)}))
     db.commit()
-    body = {
-        "count": len(scans),
-        "scans": [scan_json(s, settings=settings) for s in scans],
-        "rejected": rejected,
-    }
-    return JSONResponse(body, status_code=201)
+    queue = request.app.state.jobs
+    tasks.add_task(queue.run_one, queue.enqueue(db, "bulk_scan", batch.id, user.id).id)
+    return batch
+
+
+def batch_json(batch: ScanBatch, settings: Settings) -> dict[str, Any]:
+    return {"id": batch.id, "state": batch.state, "total": batch.total, "done": batch.done,
+            "rejected": batch.rejected, "created_at": batch.created_at.isoformat(),
+            "finished_at": batch.finished_at.isoformat() if batch.finished_at else None}
+
+
+@router.get("/api/scan-batches/{batch_id}")
+def get_batch(batch_id: int, db: DbDep, settings: SettingsDep, user: CurrentUser) -> dict:
+    """Progress and results of a background list scan."""
+    batch = db.get(ScanBatch, batch_id)
+    if batch is None or (batch.owner_id != user.id and user.role != Role.admin):
+        raise AppError(404, "batch_not_found", "We could not find that list scan.")
+    scans = db.scalars(select(Scan).where(Scan.batch_id == batch.id).order_by(Scan.id)).all()
+    return {**batch_json(batch, settings), "count": len(scans),
+            "scans": [scan_json(s, settings=settings, level=detail_level(s, user)) for s in scans]}
 
 
 def _load_scan(db: Session, scan_id: int) -> Scan:
@@ -164,11 +239,16 @@ def _load_scan(db: Session, scan_id: int) -> Scan:
 
 
 def _can_read(scan: Scan, user: User | None, token: str | None, settings: Settings) -> bool:
-    if token and share_token_allows(settings, token, scan.id):
+    if token and share_token_allows(settings, token, scan.id, scan.share_revoked_at):
         return True
     if user is None:
         return False
-    return user.role == Role.admin or scan.site.owner_id == user.id
+    return user.role == Role.admin or (scan.site.owner_id is not None
+                                       and access.can(object_session(scan), user, scan.site, "view"))
+
+
+def _via_link(scan: Scan, token: str | None, settings: Settings) -> bool:
+    return bool(token) and share_token_allows(settings, token, scan.id, scan.share_revoked_at)
 
 
 def _authorised_scan(db: Session, scan_id: int, user: User | None, token: str | None, settings: Settings) -> Scan:
@@ -184,7 +264,31 @@ def _authorised_scan(db: Session, scan_id: int, user: User | None, token: str | 
 @router.get("/api/scans/{scan_id}")
 def get_scan(scan_id: int, db: DbDep, settings: SettingsDep, user: OptionalUser, token: str | None = None) -> dict:
     """The risk report as JSON. Needs a login (owner) or a valid share-link token."""
-    return scan_json(_authorised_scan(db, scan_id, user, token, settings))
+    scan = _authorised_scan(db, scan_id, user, token, settings)
+    return scan_json(scan, level=detail_level(scan, user, _via_link(scan, token, settings)))
+
+
+@router.post("/api/scans/{scan_id}/claim", status_code=201)
+def claim_scan(scan_id: int, db: DbDep, settings: SettingsDep, user: CurrentUser, token: str | None = None) -> dict:
+    """Add a scanned site to your sites (with this report in its history) and start ownership verification."""
+    from .. import verification
+
+    scan = _authorised_scan(db, scan_id, user, token, settings)
+    site = db.scalar(select(Site).where(Site.owner_id == user.id, Site.domain == scan.site.domain))
+    if site is None:
+        site = Site(owner_id=user.id, domain=scan.site.domain, platform=scan.site.platform)
+        db.add(site)
+        db.flush()
+    if scan.site_id != site.id:
+        scan = Scan(site_id=site.id, detected_version=scan.detected_version, risk=scan.risk,
+                    raw_headers=scan.raw_headers, scanned_url=scan.scanned_url, findings=scan.findings,
+                    created_at=scan.created_at)
+        db.add(scan)
+        db.flush()
+    db.add(AuditLog(user_id=user.id, site_id=site.id, action="site.claimed", detail={"scan_id": scan_id}))
+    db.commit()
+    return {"site_id": site.id, "scan_id": scan.id, "verification": verification.start(db, site, user),
+            "next": f"/dashboard/sites/{site.id}/verify"}
 
 
 @router.get("/api/scans/{scan_id}/share")
@@ -195,6 +299,18 @@ def share_scan(scan_id: int, db: DbDep, settings: SettingsDep, user: CurrentUser
         raise AppError(404, "scan_not_found", "We could not find that scan.")
     url, expires = share_url(settings, scan)
     return {"url": url, "expires_at": expires}
+
+
+@router.post("/api/scans/{scan_id}/share/revoke")
+def revoke_share_links(scan_id: int, db: DbDep, user: CurrentUser) -> dict:
+    """Every share link to this report issued so far stops working. New links can still be made."""
+    scan = _load_scan(db, scan_id)
+    if scan.site.owner_id is None or not access.can(db, user, scan.site, "edit"):
+        raise AppError(404, "scan_not_found", "We could not find that scan.")
+    scan.share_revoked_at = datetime.now(timezone.utc)
+    db.add(AuditLog(user_id=user.id, site_id=scan.site_id, action="scan.share_revoked", detail={"scan_id": scan.id}))
+    db.commit()
+    return {"scan_id": scan.id, "revoked_at": scan.share_revoked_at.isoformat()}
 
 
 REPORT_HEADERS = {
@@ -221,6 +337,9 @@ def scan_report_page(
             request, "error.html", {"code": exc.code, "message": exc.message},
             status_code=exc.status_code, headers=REPORT_HEADERS,
         )
+    level = detail_level(scan, user, _via_link(scan, token, settings))
+    claim_url = f"/dashboard/claim/{scan.id}" + (f"?token={token}" if token else "")
     return request.app.state.templates.TemplateResponse(
-        request, "report.html", {"scan": scan, "report": scan_json(scan)}, headers=REPORT_HEADERS
+        request, "report.html", {"scan": scan, "report": scan_json(scan, level=level), "claim_url": claim_url},
+        headers=REPORT_HEADERS
     )

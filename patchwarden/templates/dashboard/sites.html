@@ -11,6 +11,8 @@
   {% set site = row.site %}
   <section class="block" id="site-{{ site.id }}">
     <h2>{{ site.domain }}</h2>
+    <p class="muted">{% if site.verified_at %}<span class="ok">Ownership verified</span>{% else %}Ownership not verified · <a href="/dashboard/sites/{{ site.id }}/verify">Verify it</a> to see full reports{% endif %}
+       · <a href="/dashboard/sites/{{ site.id }}/connect">Connect your hosting</a></p>
     <p>
       {% if row.scan %}
         <span class="badge risk-{{ row.scan.risk.value }}">{{ risk_labels[row.scan.risk.value] }}</span>
@@ -51,6 +53,17 @@
   {% else %}
   <p>No sites yet. Add one below.</p>
   {% endfor %}
+
+  <section class="block">
+    <h2>Scan a list of sites</h2>
+    <form method="post" action="/dashboard/scan-batches" enctype="multipart/form-data" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="file" name="file" accept=".csv,text/csv" required>
+      <label><input type="checkbox" name="wordpress"> Check WordPress plugins too</label>
+      <button type="submit">Scan the list</button>
+    </form>
+    <p class="muted">A CSV with one domain per row, up to 1,000. It runs in the background; you can close this page.</p>
+  </section>
 
   <section class="block">
     <h2>Add a site</h2>

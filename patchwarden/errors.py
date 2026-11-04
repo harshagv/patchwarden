@@ -18,11 +18,12 @@ log = logging.getLogger(__name__)
 
 
 class AppError(Exception):
-    def __init__(self, status_code: int, code: str, message: str):
+    def __init__(self, status_code: int, code: str, message: str, headers: dict[str, str] | None = None):
         super().__init__(code)
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.headers = headers
 
 
 def error_body(code: str, message: str) -> dict[str, str]:
@@ -79,7 +80,7 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(AppError)
     async def _app_error(_request: Request, exc: AppError):
-        return JSONResponse(error_body(exc.code, exc.message), status_code=exc.status_code)
+        return JSONResponse(error_body(exc.code, exc.message), status_code=exc.status_code, headers=exc.headers)
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(_request: Request, exc: StarletteHTTPException):

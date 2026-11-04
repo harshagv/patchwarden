@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from pathlib import Path
 
 from ..models import AccessMethod, CredentialKind
 
@@ -30,9 +29,11 @@ class AdapterUnavailable(AdapterError):
 
 
 @dataclass(frozen=True)
-class BackupArtifact:
-    location: str
-    checksum: str  # sha256 hex of the backup archive
+class BackupData:
+    """A full backup handed over by the host. Patchwarden encrypts and stores it (see backups.py)."""
+
+    archive: bytes  # files + database, in the host's archive format
+    checksum: str  # SHA-256 hex the host computed for the archive
 
 
 @dataclass(frozen=True)
@@ -55,12 +56,12 @@ class HostingAdapter(ABC):
         """PHP versions the host can switch this site to (read-only)."""
 
     @abstractmethod
-    async def create_backup(self, dest_dir: Path) -> BackupArtifact:
+    async def create_backup(self) -> BackupData:
         """Full backup: files + database."""
 
     @abstractmethod
-    async def verify_restore(self, backup: BackupArtifact) -> RestoreCheck:
-        """Restore dry-run: prove the backup can be restored, without restoring it."""
+    async def verify_restore(self, archive: bytes) -> RestoreCheck:
+        """Restore dry-run: prove the (decrypted) archive can be restored, without restoring it."""
 
     @abstractmethod
     async def set_php_version(self, version: str) -> None:
@@ -71,8 +72,8 @@ class HostingAdapter(ABC):
         """Restart PHP workers (FPM pool / panel restart action)."""
 
     @abstractmethod
-    async def restore_backup(self, backup: BackupArtifact) -> None:
-        """Put files + database back from the backup."""
+    async def restore_backup(self, archive: bytes) -> None:
+        """Put files + database back from the (decrypted) archive."""
 
     # Migration agent (Phase 4)
 
@@ -124,10 +125,10 @@ class _NotConnectedAdapter(HostingAdapter):
     async def available_versions(self) -> list[str]:
         self._refuse()
 
-    async def create_backup(self, dest_dir: Path) -> BackupArtifact:
+    async def create_backup(self) -> BackupData:
         self._refuse()
 
-    async def verify_restore(self, backup: BackupArtifact) -> RestoreCheck:
+    async def verify_restore(self, archive: bytes) -> RestoreCheck:
         self._refuse()
 
     async def set_php_version(self, version: str) -> None:
@@ -136,7 +137,7 @@ class _NotConnectedAdapter(HostingAdapter):
     async def restart_php(self) -> None:
         self._refuse()
 
-    async def restore_backup(self, backup: BackupArtifact) -> None:
+    async def restore_backup(self, archive: bytes) -> None:
         self._refuse()
 
     async def read_code(self) -> dict[str, str]:

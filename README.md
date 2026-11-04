@@ -145,12 +145,13 @@ reference opens at `http://localhost:8000/docs`.
 
 These are the steps you or your customer follow on the dashboard (`/dashboard`).
 
-1. **Scan.** Add the site and press **Scan now**. Send the owner the report link: it opens without a login and expires after 7 days.
-2. **Give access, without a password.** In the hosting panel (cPanel or Plesk), create an API token that can only change the PHP version and restart PHP. Paste it into Patchwarden under **Save access token**. It is stored encrypted and never shown again.
-3. **Plan the fix.** Press **Plan a PHP update**. You get a dry run that lists exactly what will happen; nothing has changed yet.
-4. **Approve.** Press **Approve and run**. Patchwarden backs up, updates, restarts and checks the homepage, login and form pages. If any check fails, it rolls back automatically.
-5. **Keep it safe.** Turn monitoring on. The site is checked daily, new flaws are matched hourly, the owner is alerted the same day, and a monthly report arrives on the 1st.
-6. **Too old to patch?** Press **Plan a migration**. You get a breakage report (file and line), a fix plan with an effort estimate, staging tests, then sign-off and promotion.
+1. **Scan.** Add the site and press **Scan now**, or upload a CSV of up to 1,000 sites (it runs in the background). Send the owner the report link: it opens without a login and expires after 7 days. Owners who find their site through a free scan press **Claim this site** on the report.
+2. **Prove it's yours.** Add a DNS TXT record or a small file (or connect the WordPress plugin). Until then, reports show the version, the risk and what to do; the full report (headers, which plugin is vulnerable) opens once ownership is verified.
+3. **Give access, without a password.** In the hosting panel (cPanel or Plesk), create an API token that can only change the PHP version and restart PHP. Paste it into Patchwarden under **Save access token**. It is stored encrypted and never shown again.
+4. **Plan the fix.** Press **Plan a PHP update**. You get a dry run that lists exactly what will happen; nothing has changed yet.
+5. **Approve.** Press **Approve and run**. Patchwarden backs up, updates, restarts and checks the homepage, login and form pages. If any check fails, it rolls back automatically.
+6. **Keep it safe.** Turn monitoring on. The site is checked daily, new flaws are matched hourly, the owner is alerted the same day, and a monthly report arrives on the 1st.
+7. **Too old to patch?** Press **Plan a migration**. You get a breakage report (file and line), a fix plan with an effort estimate, staging tests, then sign-off and promotion.
 
 ### WordPress owners: install the plugin
 
@@ -207,6 +208,9 @@ process (the scheduler runs inside it), and run `make secret-scan` before every 
 | `PUBLIC_BASE_URL` | Yes (production) | Your HTTPS address |
 | `SMTP_*`, `ALERT_FROM_EMAIL` | For email alerts | Any SMTP provider |
 | `NVD_API_KEY` | Optional | The NVD API key request page (free); it raises the rate limit |
+| `ATTESTATION_KEY` | Yes, if you offer signed "patched" badges | A base64url 32-byte Ed25519 seed |
+| `PRICE_*`, `CURRENCY`, `MIGRATION_HOURLY_RATE` | Optional | Your own prices, for the billing export and instant migration quotes |
+| `MIGRATION_TOOLS`, `SANDBOX_IMAGE` | Optional | `docker` plus the image built from `docker/php-tools`, to add Rector and PHPStan to migration plans |
 
 The full list, including what site owners supply themselves, is in the [technical guide](docs/TECHNICAL.md#secrets).
 
@@ -215,8 +219,15 @@ The full list, including what site owners supply themselves, is in the [technica
 ## Security and privacy
 
 - **SSRF protection.** The free scanner refuses private, internal and cloud-metadata addresses, checks every redirect, and pins each connection to the checked address.
-- **Customers' hosting tokens** are encrypted at rest and decrypted only for the call that uses them.
+- **Not a recon tool.** Anyone can see a site's version and risk (the site shows those to the world anyway). The details that help an attacker (response headers, which plugin is vulnerable) need proof of ownership, and list scans need an account.
+- **Crash-safe changes.** Patches, rollbacks, staging runs and promotions are durable jobs. If the server dies mid-change, the job is picked up again, and a half-done change is put back from the backup automatically.
+- **Encrypted backups.** Each backup (a customer's files and database) is encrypted with its own AES-256-GCM key, kept with `600` permissions, and deleted after `BACKUP_RETENTION_DAYS` (default 30).
+- **Customers' hosting tokens** are encrypted at rest and decrypted only for the call that uses them. Keys can be rotated without downtime (`python -m patchwarden rotate-credentials`).
+- **Tamper-evident audit log.** Every entry carries the hash of the one before it; `python -m patchwarden verify-audit` finds any changed entry.
+- **Two-step login** (any authenticator app, plus single-use recovery codes), "log out everywhere", revocable report links, and rate limits on free scans and failed logins.
 - **Plugin keys** are stored only as a hash and shown once.
+- **Teams with roles** (owner, admin, member, approver, viewer) and an optional four-eyes rule: whoever planned a change cannot approve it.
+- **Untrusted code stays in a box.** Rector, PHPStan and `php -l` run in a container with no network, a read-only file system and no privileges.
 - **No credential appears in any response, page, report, alert, email or log.** Automated "canary" tests prove this for every agent.
 - **Hardened dashboard.** It uses HttpOnly SameSite cookies, CSRF tokens on every form, strict security headers, and one plain error format with no stack traces.
 - **Reports never show string literals from a customer's code**, so a password in their config never reaches a report.
@@ -234,10 +245,18 @@ Be clear with your customers about what is live. This is the honest state of the
 | Approval, backup, checks, automatic rollback and audit log (Patch workflow) | ✅ Ready, tested against simulated hosting panels |
 | **Real cPanel / Plesk / server-agent connections** | ⏳ **Not connected yet.** The interface is ready, and the connectors refuse to act rather than pretend. Required before selling Patch or Migration on real hosting. |
 | Watchdog: daily checks, CVE and PHP-release matching, alerts, monthly reports | ✅ Ready (NVD and php.net are tested with recorded responses) |
+| Watchdog at scale: parallel checks, CISA KEV and EPSS priority, daily digest, escalation, Slack, Teams and signed webhooks, payment reminders | ✅ Ready (KEV and EPSS are tested with recorded responses) |
+| Teams and roles, four-eyes approval, white-label reports and emails | ✅ Ready |
+| Billing export (subscriptions, patch fees, migration quotes, virtual patches), instant migration quotes | ✅ Ready. It records what is owed; collecting payment is up to you. |
+| Signed "patched" attestations, with a public check and a badge | ✅ Ready |
+| Virtual patch at the edge: Cloudflare and AWS WAF | ✅ Ready, tested against the providers' API formats (AWS checked against the official API model) |
+| Virtual patch at the edge: Akamai | ⚠️ Built to Akamai's public API reference, not yet verified against a live Akamai account |
+| Rector / PHPStan in a sandbox for migration plans | ✅ Ready. Build the tools image once (`docker build -t patchwarden/php-tools:1 docker/php-tools`). |
+| Per-site software inventory (CycloneDX SBOM) | ✅ Ready |
 | Migration: breakage scan, plan, staging, sign-off, promotion | ✅ Ready, tested against simulated hosting. The code scan is static and cannot see runtime-only issues, which staging tests cover. |
 | WordPress plugin | ✅ Ready, tested by running the real plugin against a WordPress stand-in. Not yet tested inside a full WordPress install. |
 | Docker deployment (`make up`) | ⚠️ Written but not yet run end to end |
-| Payments (Stripe), agency white-label billing, multi-tenant agency accounts | ❌ Not in this release. A subscription status field and its rules are ready for a payments phase. |
+| Taking payments (Stripe or similar) | ❌ Not in this release. Subscription status, payment reminders and the billing export are ready for it. |
 
 The planned next steps are in the technical guide's [Future ideas](docs/TECHNICAL.md#future-ideas).
 

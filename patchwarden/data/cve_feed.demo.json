@@ -1,17 +1,46 @@
 {
   "name": "PHP Guard demo CVE feed (fixture, made-up entries)",
-  "note": "Used when CVE_FEED=fixture (the default in development). Same shapes as the NVD CVE API 2.0 ('nvd') and php.net release JSON ('php_releases'). Add an entry and the next Watchdog poll will alert matching sites. IDs here are fictional.",
+  "note": "Used when CVE_FEED=fixture (the default in development). Same shapes as the NVD CVE API 2.0 ('nvd') and php.net release JSON ('php_releases'). Add an entry and the next Watchdog poll will alert matching sites. IDs here are fictional. 'kev' and 'epss' mimic CISA KEV entries and FIRST EPSS scores.",
   "nvd": [
     {
       "cve": {
         "id": "PHPG-DEMO-2026-0101",
-        "descriptions": [{"lang": "en", "value": "Demo only: a made-up flaw in PHP 8.3 before 8.3.40 that lets a crafted upload crash PHP workers."}],
-        "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 7.5, "baseSeverity": "HIGH"}}]},
-        "configurations": [{"nodes": [{"cpeMatch": [
-          {"vulnerable": true, "criteria": "cpe:2.3:a:php:php:*:*:*:*:*:*:*:*", "versionStartIncluding": "8.3.0", "versionEndExcluding": "8.3.40"}
-        ]}]}]
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "Demo only: a made-up flaw in PHP 8.3 before 8.3.40 that lets a crafted upload crash PHP workers."
+          }
+        ],
+        "metrics": {
+          "cvssMetricV31": [
+            {
+              "cvssData": {
+                "baseScore": 7.5,
+                "baseSeverity": "HIGH"
+              }
+            }
+          ]
+        },
+        "configurations": [
+          {
+            "nodes": [
+              {
+                "cpeMatch": [
+                  {
+                    "vulnerable": true,
+                    "criteria": "cpe:2.3:a:php:php:*:*:*:*:*:*:*:*",
+                    "versionStartIncluding": "8.3.0",
+                    "versionEndExcluding": "8.3.40"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     }
   ],
-  "php_releases": []
+  "php_releases": [],
+  "kev": [],
+  "epss": {}
 }

@@ -18,9 +18,13 @@ from pathlib import Path
 
 import httpx
 
-from .patch.adapters import AdapterError, BackupArtifact, HostingAdapter, RestoreCheck
+from .patch.adapters import AdapterError, BackupData, HostingAdapter, RestoreCheck
 
 DEMO_SUFFIX = ".demo.patchwarden.test"
+
+
+class SimulatedCrash(BaseException):
+    """Stands in for the process dying (BaseException: no `except Exception` can swallow it)."""
 
 
 @dataclass
@@ -37,11 +41,26 @@ class FakeHost:
     expected_token: str | None = None  # None: any non-empty token is accepted
     hide_version: bool = False  # no X-Powered-By header: only an inside check can read the version
     run_code: bool = True  # False: the checked pages do not load the broken files (so checks pass anyway)
+    crash_on: str | None = None  # simulate the Patchwarden server dying during this call (once)
+    well_known: dict = field(default_factory=dict)  # "/.well-known/x" -> text, served as plain text
+    _calls: dict = field(default_factory=dict, repr=False)
     fail_backup: bool = False
     corrupt_backup: bool = False  # backup written but it does not match its checksum
     fail_restore: bool = False
     mutations: list[str] = field(default_factory=list)  # every state-changing call
     restarts: int = 0
+
+    def crash_check(self, call: str) -> None:
+        """crash_on="restart_php" crashes on the first restart; "restart_php#2" on the second."""
+        if not self.crash_on:
+            return
+        name, _, nth = self.crash_on.partition("#")
+        if name != call:
+            return
+        self._calls[call] = self._calls.get(call, 0) + 1
+        if self._calls[call] == int(nth or 1):
+            self.crash_on = None
+            raise SimulatedCrash(f"simulated server crash during {call}")
 
     def snapshot(self) -> dict:
         return {"php_version": self.php_version, "configured_version": self.configured_version,
@@ -54,6 +73,8 @@ class FakeHost:
         return self.run_code and scan_files(self.files, "5.6.0", self.php_version)["errors"] > 0
 
     def serve(self, path: str) -> httpx.Response:
+        if path in self.well_known:
+            return httpx.Response(200, headers={"Content-Type": "text/plain"}, text=self.well_known[path])
         status = self.pages.get(path, 404)
         if path in self.broken_on.get(self.php_version, set()) or (status == 200 and self.code_fails()):
             status = 500
@@ -131,6 +152,11 @@ _LEGACY81_FILES = {
         "        return utf8_encode($name);\n"
         "    }\n"
         "}\n"),
+    # Composer dependencies, for the per-site SBOM (not code: the migration scan ignores it).
+    "composer.lock": json.dumps({"packages": [
+        {"name": "monolog/monolog", "version": "2.9.1", "license": ["MIT"]},
+        {"name": "guzzlehttp/guzzle", "version": "7.4.5", "license": ["MIT"]},
+    ], "packages-dev": [{"name": "phpunit/phpunit", "version": "9.6.13", "license": ["BSD-3-Clause"]}]}),
 }
 
 
@@ -144,6 +170,8 @@ class DemoWorld:
 
     def __init__(self, hosts: list[FakeHost] | None = None):
         self.hosts: dict[str, FakeHost] = {h.domain: h for h in (hosts or [])}
+        self.txt_records: dict[str, list[str]] = {}  # fake DNS: name -> TXT strings
+        self.waf_rules: dict[str, list[str]] = {}  # fake edge WAF: domain -> virtual patch rule tags
 
     @classmethod
     def seeded(cls) -> DemoWorld:
@@ -188,40 +216,31 @@ class FakeHostingAdapter(HostingAdapter):
     async def available_versions(self) -> list[str]:
         return list(self._auth().available_versions)
 
-    async def create_backup(self, dest_dir: Path) -> BackupArtifact:
+    async def create_backup(self) -> BackupData:
         host = self._auth()
         if host.fail_backup:
             raise AdapterError("backup_failed", f"{self.display_name} could not create a backup.")
+        host.crash_check("create_backup")
         host.mutations.append("create_backup")
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        folder = dest_dir / host.domain
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"{stamp}-{secrets.token_hex(4)}.json"
         data = json.dumps({"domain": host.domain, "php_version": host.php_version,
                            "files": host.files, "database": host.database}, sort_keys=True).encode()
-        path.write_bytes(data)
         checksum = hashlib.sha256(data).hexdigest()
-        if host.corrupt_backup:
-            path.write_bytes(data[: len(data) // 2])
-        return BackupArtifact(location=str(path), checksum=checksum)
+        if host.corrupt_backup:  # the archive arrives damaged: it no longer matches the host's checksum
+            data = data[: len(data) // 2]
+        return BackupData(archive=data, checksum=checksum)
 
-    async def verify_restore(self, backup: BackupArtifact) -> RestoreCheck:
+    async def verify_restore(self, archive: bytes) -> RestoreCheck:
         self._auth()
         try:
-            data = Path(backup.location).read_bytes()
-        except OSError:
-            return RestoreCheck(False, "The backup file is missing.")
-        if hashlib.sha256(data).hexdigest() != backup.checksum:
-            return RestoreCheck(False, "The backup checksum does not match.")
-        try:
-            archive = json.loads(data)
-            files, tables = archive["files"], archive["database"]
+            parsed = json.loads(archive)
+            files, tables = parsed["files"], parsed["database"]
         except (ValueError, KeyError):
             return RestoreCheck(False, "The backup could not be read back.")
         return RestoreCheck(True, f"Restore dry-run read {len(files)} files and {len(tables)} database tables.")
 
     async def set_php_version(self, version: str) -> None:
         host = self._auth()
+        host.crash_check("set_php_version")
         if version not in host.available_versions:
             raise AdapterError("version_unavailable", f"PHP {version} is not available on this host.")
         host.mutations.append(f"set_php_version:{version}")
@@ -229,20 +248,21 @@ class FakeHostingAdapter(HostingAdapter):
 
     async def restart_php(self) -> None:
         host = self._auth()
+        host.crash_check("restart_php")
         host.mutations.append("restart_php")
         host.restarts += 1
         if host.configured_version:
             host.php_version = host.configured_version
             host.configured_version = None
 
-    async def restore_backup(self, backup: BackupArtifact) -> None:
+    async def restore_backup(self, archive: bytes) -> None:
         host = self._auth()
         if host.fail_restore:
             raise AdapterError("restore_failed", f"{self.display_name} could not restore the backup.")
-        archive = json.loads(Path(backup.location).read_bytes())
+        parsed = json.loads(archive)
         host.mutations.append("restore_backup")
-        host.files = archive["files"]
-        host.database = archive["database"]
+        host.files = parsed["files"]
+        host.database = parsed["database"]
 
     async def read_code(self) -> dict[str, str]:
         return dict(self._auth().files)
@@ -273,5 +293,6 @@ class FakeHostingAdapter(HostingAdapter):
 
     async def write_files(self, files: dict[str, str]) -> None:
         host = self._auth()
+        host.crash_check("write_files")
         host.mutations.append("write_files:" + ",".join(sorted(files)))
         host.files.update(files)

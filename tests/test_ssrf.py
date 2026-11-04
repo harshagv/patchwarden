@@ -156,10 +156,11 @@ def test_api_refuses_internal_target_and_stores_nothing(client):
         assert db.query(Scan).count() == 0
 
 
-def test_bulk_reports_rejected_rows_and_scans_the_rest(client):
-    r = client.post("/api/scans", json={"domains": [demo("php84-fixed"), "http://127.0.0.1/", "ftp://x.example"]})
-    assert r.status_code == 201
-    body = r.json()
+def test_bulk_reports_rejected_rows_and_scans_the_rest(client, auth_headers):
+    r = client.post("/api/scans", json={"domains": [demo("php84-fixed"), "http://127.0.0.1/", "ftp://x.example"]},
+                    headers=auth_headers)
+    assert r.status_code == 202
+    body = client.get(r.json()["status_url"], headers=auth_headers).json()
     assert body["count"] == 1
     assert [x["error"] for x in body["rejected"]] == ["blocked_private", "blocked_scheme"]
 

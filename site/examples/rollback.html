@@ -28,6 +28,8 @@
   table { border-collapse:collapse; width:100%; font-family:ui-monospace, Menlo, monospace; font-size:.8rem; }
   td { border-top:1px solid var(--line); padding:4px 6px; vertical-align:top; word-break:break-all; }
   footer { margin-top:18px; font-size:.82rem; color:var(--muted); }
+  .cta { background:#f1f7f3; border:1px solid #cfe6d9; border-radius:10px; padding:16px 18px; margin-top:18px; }
+  .cta__button { display:inline-block; background:var(--safe); color:#fff; padding:9px 18px; border-radius:999px; text-decoration:none; font-weight:600; }
   .wide { max-width:980px; }
   nav { display:flex; gap:16px; align-items:center; margin-bottom:18px; }
   nav .grow { flex:1; font-weight:700; }
@@ -112,7 +114,7 @@
     
     <section class="block">
       <h2>Backup</h2>
-      <p>Location: /var/lib/patchwarden/backups/fragile84.demo.patchwarden.test/20261103T151439Z-3b60b83b.json<br>
+      <p>Location: /var/lib/patchwarden/backups/fragile84.demo.patchwarden.test/20261103T211050Z-64611918.pwbak<br>
          Checksum (SHA-256): <code>4e86ee64d1291228eb1c2be1be55eb54b870b6919cf573ea8a7ff8660c6fbecd</code><br>
          Verified: yes. Restore dry-run read 3 files and 2 database tables.</p>
     </section>
@@ -120,10 +122,10 @@
 
     <section class="block">
       <h2>Record</h2>
-      <p>Dry run: 2026-11-03T15:14:39.248629+00:00<br>
-         Approved by: owner@example.com at 2026-11-03T15:14:39.250606+00:00<br>
-         Finished: 2026-11-03T15:14:39.255037+00:00</p>
-      <ol><li><span class="ok">backup</span>: Restore dry-run read 3 files and 2 database tables. <span class="muted">(2026-11-03T15:14:39.252836+00:00)</span></li><li><span class="ok">before_checks</span>: All checks passed. <span class="muted">(2026-11-03T15:14:39.253341+00:00)</span></li><li><span class="ok">switch</span>: PHP set to 8.4.27. <span class="muted">(2026-11-03T15:14:39.253574+00:00)</span></li><li><span class="ok">restart</span>: PHP workers restarted. <span class="muted">(2026-11-03T15:14:39.253770+00:00)</span></li><li><span class="bad">after_checks</span>: checkout / form page /checkout returned 500 <span class="muted">(2026-11-03T15:14:39.254200+00:00)</span></li><li><span class="ok">rollback</span>: Backup restored and PHP switched back to 8.4.13. <span class="muted">(2026-11-03T15:14:39.254886+00:00)</span></li></ol>
+      <p>Dry run: 2026-11-03T21:10:50.262974+00:00<br>
+         Approved by: owner@example.com at 2026-11-03T21:10:50.264835+00:00<br>
+         Finished: 2026-11-03T21:10:50.270631+00:00</p>
+      <ol><li><span class="ok">backup</span>: Restore dry-run read 3 files and 2 database tables. <span class="muted">(2026-11-03T21:10:50.267737+00:00)</span></li><li><span class="ok">before_checks</span>: All checks passed. <span class="muted">(2026-11-03T21:10:50.268280+00:00)</span></li><li><span class="ok">switch</span>: PHP set to 8.4.27. <span class="muted">(2026-11-03T21:10:50.268751+00:00)</span></li><li><span class="ok">restart</span>: PHP workers restarted. <span class="muted">(2026-11-03T21:10:50.269069+00:00)</span></li><li><span class="bad">after_checks</span>: checkout / form page /checkout returned 500 <span class="muted">(2026-11-03T21:10:50.269539+00:00)</span></li><li><span class="ok">rollback</span>: Backup restored and PHP switched back to 8.4.13. <span class="muted">(2026-11-03T21:10:50.270469+00:00)</span></li></ol>
     </section>
 
     
